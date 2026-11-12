@@ -61,16 +61,18 @@ interface StubManager {
 function stubManager(
   settle: (type: string, prompt: string, options: any) => Promise<AgentRecord> | AgentRecord = () => record(),
 ): StubManager {
+  const records = new Map<string, AgentRecord>();
   const abort = vi.fn();
   const resume = vi.fn(async () => record({ id: "agent-1", result: "resumed" }));
   const spawnAndWait = vi.fn(
     async (_pi: any, _ctx: any, type: string, prompt: string, options: any, onSpawned?: (id: string) => void) => {
       const settled = await settle(type, prompt, options);
+      records.set(settled.id, settled);
       onSpawned?.(settled.id);
       return { id: settled.id, record: settled };
     },
   );
-  return { manager: { spawnAndWait, abort, resume } as unknown as AgentManager, spawnAndWait, abort, resume };
+  return { manager: { spawnAndWait, abort, resume, getRecord: (id: string) => records.get(id) } as unknown as AgentManager, spawnAndWait, abort, resume };
 }
 
 const request = (overrides: Partial<WorkflowSpawnRequest> = {}): WorkflowSpawnRequest => ({

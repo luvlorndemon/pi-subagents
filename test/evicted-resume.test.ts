@@ -308,7 +308,7 @@ describe("a workflow's resume once the manager evicted the child", () => {
       return { id: record.id, record };
     });
     const resume = vi.fn(async () => undefined);
-    return { manager: { spawnAndWait, resume, abort: vi.fn() } as unknown as AgentManager, spawnAndWait, resume };
+    return { manager: { spawnAndWait, resume, abort: vi.fn(), getRecord: vi.fn(() => undefined) } as unknown as AgentManager, spawnAndWait, resume };
   }
 
   const request = { agentId: "wf-agent-0", index: 0, prompt: "build it", label: "worker", agentType: "general-purpose" };

@@ -57,6 +57,14 @@ export function worktreeLost(record: Pick<AgentRecord, "worktree" | "worktreeRes
   return record.worktree !== undefined && record.worktreeResult?.hasChanges !== false;
 }
 
+/** Refusing a resume must not mutate the run or its previous result. */
+export function liveResumeRefusal(record: AgentRecord): string | undefined {
+  if (record.status === "running" || record.status === "queued" || record.resumeInProgress || record.session?.isStreaming === true) return `is still ${record.status === "queued" ? "queued" : "running"} — it can only be resumed once its current run finishes.\nUse steer_subagent to send it a message mid-run, or get_subagent_result to wait for it.`;
+  if (record.worktree && !record.worktreeResult) return "is still finishing worktree cleanup.";
+  if (worktreeLost(record)) return `cannot resume because its worktree no longer exists.${record.worktreeResult?.branch ? ` Changes are saved on branch ${record.worktreeResult.branch}.` : ""}`;
+  return undefined;
+}
+
 /** Snapshot a finished record for {@link AGENT_RECORD_ENTRY_TYPE}. */
 export function agentRecordEntryData(record: AgentRecord): AgentRecordEntryData {
   return {

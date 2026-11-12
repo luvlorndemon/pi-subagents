@@ -290,6 +290,7 @@ describe("child-safe nested Agent tools", () => {
   it("passes max_turns through on a nested resume", async () => {
     const [agent] = tools(["scout"]);
     await execute(agent, { subagent_type: "scout", description: "find files", prompt: "Find them", run_in_background: true });
+    records.get("child-1").status = "completed";
 
     await execute(agent, { resume: "child-1", subagent_type: "scout", description: "continue", prompt: "Continue", max_turns: 3 });
 

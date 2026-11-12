@@ -11,7 +11,11 @@ For users and maintainers of `luvlorndemon/pi-subagents`. This document describe
 
 The runtime/display name `pi` identifies a session. It has no registered persona, role prompt or role default model. Project/user/package agent definitions are ignored and left on disk. Default-agent, fallback-agent, strict-agent-file, package-agent and custom Agent-description settings have no effect. Their menu rows and the persona creation action are hidden.
 
-`name` assigns a task handle. Use `resume` with the returned agent ID for a finished child; use `steer_subagent` with its ID or handle while running. In-memory resume keeps that child's configuration. Reopening an evicted session builds a fresh runtime from the current parent's configuration while preserving saved conversation. Reopening a child owned by a different parent forks its file to avoid interleaved histories.
+`name` assigns a task handle. Use `resume` with the returned agent ID for a finished child; use `steer_subagent` with its ID or handle while running. Foreground and background resume both refuse running/queued tasks without changing their status, result or controller. In-memory resume keeps that child's configuration. Reopening an evicted session builds a fresh runtime from the current parent's configuration while preserving saved conversation. Reopening a child owned by a different parent forks its file to avoid interleaved histories.
+
+Worktree cleanup closes the old session's extensions before removing the directory. A clean worktree can be resumed: Pi rebuilds its tools and extensions in the recorded source directory, preserving conversation history, the selected model/thinking level and the child's live pi-purge snapshot. Foreground/background resume and disk reopen use that source directory, including a caller-supplied `cwd`. A worktree with saved changes cannot be resumed directly; the refusal names its preservation branch. Session metadata records the source and completed cleanup state for future reopen. A cancelled reconstruction does not start a model turn; another resume waits until the cancelled run has finished settling.
+
+Project trust stays scoped to the parent's directory. A worktree made from that same directory may inherit its trust (real-path aliases count as the same directory). A different `cwd`, and a worktree made from it, do not inherit that trust; Pi therefore does not start the foreign project's MCP commands automatically. This uses Pi's project-trust mechanism and adds no tool allowlist or per-call gate.
 
 ## pi-purge integration
 
@@ -34,7 +38,7 @@ Completion waits for `session.prompt()` to settle, including pi-purge's native c
 | Workflow `agent(prompt, opts)` | `agentType` ignored. Pipeline, gate, schema and resume preserved. Put the output format in the task. |
 | Schedules | Stored jobs run native sessions. Snapshot is taken when each execution spawns, not when the schedule is created. |
 | Nested delegation | `nativeDelegation` defaults false; depth, concurrency and ownership constraints still apply. |
-| Worktree | Existing cleanup and local preservation commits retained. No extra system directive: use relative paths or the actual worktree path in tasks. |
+| Worktree | Clean worktrees resume in their recorded source directory; changed worktrees are refused with the branch named. Cross-project worktrees do not inherit parent project trust. No extra system directive: use relative paths or the actual worktree path in tasks. |
 
 ## Testing
 
@@ -45,12 +49,14 @@ npm run check
 
 Development dependencies pin Pi 1.5.2. Native tests use the real SDK with an offline scripted provider and temporary config/auth paths. They cover prompt assembly, context opt-in, foreground/background, resume, queue snapshots, native tools in nested sessions, delegation depth, RPC, schedules, workflows, concurrent pi-purge continuation and cancellation. Tool regressions exercise writes absent from the parent's active selection, deferred/codemode extension calls, real stdio MCP discovery through tool_search, and preservation of another extension's tool_call hook.
 
+Worktree regressions use real temporary Git repositories and marker MCP servers. They verify same-source versus foreign project trust, clean foreground/background resume, persisted source-directory recovery, retained pi-purge snapshots, changed-worktree refusals, cancellation during reconstruction and duplicate-resume state preservation.
+
 Companion tests use `../pi-purge/src/index.ts` by default; set `PI_PURGE_EXTENSION` to override it. Only companion cases are skipped when that file is absent. Upstream tests exercise the preserved original entry. Windows fixture tests use native paths and async cleanup retries. Live model tests remain opt-in. macOS/Linux have not been verified on a real machine for this fork.
 
 ## Updating from upstream
 
 `origin` points to your fork; `upstream` points to `tintinweb/pi-subagents`. Commit your own changes before merging an update. Fetch and inspect the upstream diff, merge the desired revision, resolve conflicts, then run both plugins' checks. Commit and push manually when satisfied.
 
-Most customization lives in `native.ts`, `native-mode.ts`, `native-context.ts` and `native-session.ts`, with small hooks in the existing registry, manager, runner, UI and workflows. The inactive upstream persona implementation remains for comparison and regression tests. Loading both entries simultaneously is unsupported.
+Most customization lives in `native.ts`, `native-mode.ts`, `native-context.ts`, `native-session.ts` and `native-worktree.ts`, with hooks in the existing registry, manager, runner, UI and workflows. The inactive upstream persona implementation remains for comparison and regression tests. Loading both entries simultaneously is unsupported.
 
 Unrelated UI/orchestration updates should usually merge directly. Changes to Pi session construction, extension lifecycle, prompt assembly, tool boundaries or scheduling may need adaptation. A fork preserves your changes in Git; it cannot guarantee conflict-free future updates. There is no automatic push, release or upstream synchronization.

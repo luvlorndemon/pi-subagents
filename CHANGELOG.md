@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - **Extra tool restrictions in native child sessions.** Children now load tools through Pi and its extensions, including pi-purge, instead of a snapshot of the parent's active tools. Removed the static tool allowlist/denylist and both custom call gates, restoring deferred/codemode tools and native MCP discovery.
 
+### Fixed
+- **Cross-project native worktrees retain Pi's project-trust boundary.** Only worktrees sourced from the parent's own directory inherit its trust; an unrelated repository's MCP startup commands no longer run under the parent's trust.
+- **Native worktree resume uses the recorded source directory.** Clean worktrees recreate their session tools and extensions while retaining history and the child's pi-purge snapshot. Changed worktrees are refused with the preservation branch named, and extensions close before worktree removal.
+- **Foreground resume refuses running and queued tasks before mutation.** Top-level, nested and workflow entry points share the check; rejected calls no longer replace the active controller or mark a running task as failed.
+
 ## [0.23.2] - 2026-11-10
 
 ### Added

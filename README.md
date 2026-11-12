@@ -34,6 +34,8 @@ Nested delegation defaults off. Enable `nativeDelegation: true` in `.pi/subagent
 
 With the companion pi-purge bridge, children capture independent copies of the parent's effective, possibly unsaved configuration before queueing. Profiles/rules resolve from the parent configuration root, tools and `{{cwd}}` use the child's directory, and completion waits for native continuation rounds. See the fork reference for exclusions and resume semantics.
 
+Cross-project worktrees do not inherit the parent's project trust. Clean worktree sessions resume in their recorded source directory with their history; changed worktrees are refused with their preservation branch named. A running or queued task cannot be resumed again in either foreground or background mode.
+
 ## Preserved upstream reference
 
 The reference below describes the original entry. Persona presets, agent files, persona memory/preloading, append/twin prompts, custom Agent descriptions and original npm install commands below **do not apply to this fork's native entry**. Other orchestration contracts remain applicable; the fork reference above takes precedence.

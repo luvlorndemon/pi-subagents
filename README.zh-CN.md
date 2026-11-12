@@ -4,6 +4,8 @@
 
 工具由 Pi 和已加载扩展（包括 pi-purge）的配置决定。本 fork 不复制父代理工具白名单，也不额外添加工具黑名单或调用权限检查。
 
+跨项目 worktree 不继承父项目的信任。干净 worktree 的会话恢复到记录的源目录并保留历史；有改动的 worktree 会提示其保存分支，拒绝直接恢复。前后台恢复都不会重入正在运行或排队的任务。
+
 适配 Pi **1.5.2**，需要 Node.js **>=22.19.0**。配套 pi-purge 会传递主会话当前配置的独立快照，包括未保存改动。详见 [fork 安装与使用](README.md#install-this-fork) 和 [原生会话、pi-purge 兼容与上游更新说明](docs/native-sessions.md)。尚未发布 npm 包，请通过本 fork 的 Git 地址或本地目录安装。
 
 **下面保留的是上游文档**：其中人设、Agent 定义文件、角色记忆、twin 提示词及原版 npm 安装命令不适用于本 fork。使用包目录或 `src/native.ts` 加载；`src/index.ts` 是上游参考入口。

@@ -22,13 +22,15 @@ import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { worktreeLost } from "./agent-record-entry.js";
+import { liveResumeRefusal, worktreeLost } from "./agent-record-entry.js";
 import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
 import { getAgentConfig } from "./agent-types.js";
 import { assignHandle, handleBase } from "./mention.js";
 import { describeModel } from "./model-resolver.js";
 import { captureNativeContext, type NativeSpawnContext } from "./native-context.js";
 import { isNativeSessionMode, NATIVE_SESSION_TYPE } from "./native-mode.js";
+import { createNativeSession } from "./native-session.js";
+import { NATIVE_WORKTREE_ENTRY } from "./native-worktree.js";
 import type { AgentInvocation, AgentRecord, AgentTombstone, IsolationMode, MentionResolution, Pool, SubagentType, ThinkingLevel } from "./types.js";
 import { addUsage, type LifetimeUsage } from "./usage.js";
 import type { CompiledSchema } from "./workflow/json-schema.js";
@@ -325,6 +327,8 @@ interface SpawnOptions {
 }
 
 interface ResumeOptions {
+  /** Refresh session-bound observers when a clean worktree resume recreates it. */
+  onSessionCreated?: (session: AgentSession) => void;
   /**
    * Run the resumed turn detached in the background: return immediately with
    * the record still "running" (or "queued" at the concurrency limit) and
@@ -391,6 +395,7 @@ async function shutdownChildSession(session: AgentSession | undefined): Promise<
 
 export class AgentManager {
   private agents = new Map<string, AgentRecord>();
+  private nativeWorktreeResumes = new Map<string, () => Promise<AgentSession>>();
   private cleanupInterval: ReturnType<typeof setInterval>;
   private onComplete?: OnAgentComplete;
   private onStart?: OnAgentStart;
@@ -996,8 +1001,24 @@ export class AgentManager {
               await options.onBeforeWorktreeCleanup(record.worktree.path);
             } catch { /* ignore — never block cleanup */ }
           }
+          const nativeContext = isNativeSessionMode() ? captureNativeContext(session.extensionRunner.createContext()) : undefined;
+          // Close extensions before removing their cwd: MCP transports and loggers
+          // must not hold or recreate a directory after worktree cleanup.
+          if (nativeContext) await shutdownChildSession(session);
           const wtResult = await cleanupWorktree(pi, baseCwd, record.worktree, options.description);
           record.worktreeResult = wtResult;
+          if (nativeContext) {
+            session.sessionManager.appendCustomEntry(NATIVE_WORKTREE_ENTRY, { sourceCwd: baseCwd, complete: true, hasChanges: wtResult.hasChanges, branch: wtResult.branch });
+            if (!wtResult.hasChanges) this.nativeWorktreeResumes.set(id, async () => {
+              const created = await createNativeSession(ctx, {
+                pi, agentId: id, cwd: baseCwd, configCwd: options.configCwd ?? ctx.cwd,
+                model: session.model,
+                isolated: options.isolated, nativeContext,
+                nestedRuntime: { manager: this, parentAgentId: id, depth: record.depth ?? 1, maxSubagentDepth: options.maxSubagentDepth },
+              }, false, session);
+              return created.session;
+            });
+          }
           if (wtResult.hasChanges && wtResult.branch) {
             // With a caller-supplied cwd the branch lives in THAT repo, not the
             // parent session's — say so, or the orchestrator merges in the wrong repo.
@@ -1262,6 +1283,7 @@ export class AgentManager {
   ): Promise<AgentRecord | undefined> {
     const record = this.agents.get(id);
     if (!record?.session) return undefined;
+    if (liveResumeRefusal(record)) return undefined;
 
     // Background resume: settle asynchronously and notify on completion exactly
     // like a background spawn, returning immediately with the record still
@@ -1270,17 +1292,6 @@ export class AgentManager {
     // returned before its background branch, and resume() only ever awaited
     // inline), so a resumed agent always blocked the caller until it finished.
     if (options?.isBackground) {
-      // Never re-enter a run that is still in flight. Detaching means the caller
-      // gets control back while the record stays "running", so nothing stops the
-      // model from resuming the same agent again. Starting a second run would
-      // overwrite record.abortController — orphaning the live run beyond the
-      // reach of `/agents` stop and abortAll() — double-count the pool slot, and
-      // then reject from session.prompt() with "Agent is already processing",
-      // whose settle path would abort the LIVE run's children and report a
-      // failure for a run that is still going. Refuse instead, leaving the
-      // record untouched; the caller decides whether to wait or steer.
-      if (record.status === "running" || record.status === "queued") return undefined;
-
       record.isBackground = true;
       record.resultConsumed = false;
       record.result = undefined;
@@ -1317,6 +1328,7 @@ export class AgentManager {
     }
 
     // Foreground resume: run inline and return the settled record.
+    record.resumeInProgress = true;
     record.status = "running";
     record.startedAt = Date.now();
     record.completedAt = undefined;
@@ -1335,7 +1347,7 @@ export class AgentManager {
     if (signal?.aborted) this.abort(id);
 
     try {
-      this.settleOutcome(record, await resumeAgent(record.session, prompt, {
+      const running = this.resumeWithSession(record, prompt, {
         type: record.type,
         maxTurns: options?.maxTurns ?? record.invocation?.maxTurns,
         onTurnEnd: options?.onTurnEnd,
@@ -1354,7 +1366,9 @@ export class AgentManager {
           options?.onCompaction?.(info);
         },
         signal: abortController.signal,
-      }));
+      }, options);
+      record.promise = running.then(outcome => outcome.text, () => "");
+      this.settleOutcome(record, await running);
     } catch (err) {
       this.failResume(record, err);
     }
@@ -1364,7 +1378,28 @@ export class AgentManager {
     // resumed turn must not outlive it — nothing else can see or reach them.
     this.abortOwnedChildren(id);
 
+    record.resumeInProgress = false;
     return record;
+  }
+
+  private async resumeWithSession(
+    record: AgentRecord, prompt: string, runOptions: Parameters<typeof resumeAgent>[2], options?: ResumeOptions,
+  ): ReturnType<typeof resumeAgent> {
+    const recreate = this.nativeWorktreeResumes.get(record.id);
+    if (recreate && !runOptions.signal?.aborted) {
+      const session = await recreate();
+      if (this.agents.get(record.id) !== record) {
+        await shutdownChildSession(session);
+        return { text: "", aborted: false, steered: false };
+      }
+      record.session = session;
+      record.sessionFile = session.sessionManager.getSessionFile();
+      if (record.invocation) record.invocation.isolation = undefined;
+      this.nativeWorktreeResumes.delete(record.id);
+      try { options?.onSessionCreated?.(session); } catch { /* ignore caller wiring errors */ }
+      try { options?.onStarted?.(); } catch { /* ignore caller wiring errors */ }
+    }
+    return resumeAgent(record.session!, prompt, runOptions);
   }
 
   /**
@@ -1405,9 +1440,8 @@ export class AgentManager {
   /**
    * Start a background resume run: detached, settling and notifying like
    * startAgent's background path. Invoked immediately, or from drainQueue when
-   * a concurrency slot frees. The session already exists (resume reuses it), so
-   * there is no onSessionCreated to hang per-run wiring off — callers use
-   * `options.onStarted`, which fires on both the immediate and the drained path.
+   * a concurrency slot frees. Callers use `options.onStarted` for per-run wiring;
+   * a clean worktree first recreates its session and refreshes session observers.
    */
   private startResume(
     id: string,
@@ -1418,6 +1452,7 @@ export class AgentManager {
   ) {
     if (!record.session) return;
 
+    record.resumeInProgress = true;
     record.status = "running";
     record.startedAt = Date.now();
     if (occupiesPoolSlot(record)) this.runningBackground++;
@@ -1432,6 +1467,7 @@ export class AgentManager {
     // right for a foreground run whose result the caller is awaiting, and wrong
     // for a detached one — background spawns omit it for exactly this reason.
     let detachParentSignal: (() => void) | undefined;
+    if (parentSignal?.aborted) this.abort(id);
     if (parentSignal) {
       const onParentAbort = () => this.abort(id);
       parentSignal.addEventListener("abort", onParentAbort, { once: true });
@@ -1440,7 +1476,9 @@ export class AgentManager {
 
     // Per-run side effects (output streaming) — see ResumeOptions.onStarted.
     // After the record is in its running shape, before the run is kicked off.
-    try { options.onStarted?.(); } catch { /* ignore caller wiring errors */ }
+    if (!this.nativeWorktreeResumes.has(id)) {
+      try { options.onStarted?.(); } catch { /* ignore caller wiring errors */ }
+    }
 
     const settle = () => {
       detachParentSignal?.();
@@ -1453,11 +1491,12 @@ export class AgentManager {
       // Children spawned during the resumed turn must not outlive it.
       this.abortOwnedChildren(id);
       if (occupiesPoolSlot(record)) this.runningBackground--;
+      record.resumeInProgress = false;
       try { this.onComplete?.(record); } catch { /* ignore completion side-effect errors */ }
       this.drainQueue();
     };
 
-    const promise = resumeAgent(record.session, prompt, {
+    const promise = this.resumeWithSession(record, prompt, {
       type: record.type,
       maxTurns: options.maxTurns ?? record.invocation?.maxTurns,
       onTurnEnd: options.onTurnEnd,
@@ -1476,7 +1515,7 @@ export class AgentManager {
         options.onCompaction?.(info);
       },
       signal: abortController.signal,
-    })
+    }, options)
       .then((outcome) => {
         this.settleOutcome(record, outcome);
         settle();
@@ -1639,6 +1678,7 @@ export class AgentManager {
 
   /** Dispose a record's session and remove it from the map. */
   private removeRecord(id: string, record: AgentRecord): void {
+    this.nativeWorktreeResumes.delete(id);
     this.tombstone(record);
     const session = record.session;
     // Detached before the shutdown starts, so the record leaves the map at once and
@@ -1768,6 +1808,7 @@ export class AgentManager {
    *   it (tests, teardown of a manager that never spawned) skips the prune.
    */
   async dispose(pi?: ExtensionAPI): Promise<void> {
+    this.nativeWorktreeResumes.clear();
     clearInterval(this.cleanupInterval);
     // Clear queue — via dequeue, so anyone blocked in spawnAndWait is woken
     // rather than left awaiting a gate nothing will ever resolve.

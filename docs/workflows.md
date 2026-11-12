@@ -2,6 +2,8 @@
 
 > Native fork: `agent(prompt, opts)` starts a native Pi session and ignores legacy `agentType`. Put the task and desired output format in `prompt`; no workflow role prefix is injected. Other orchestration behavior remains applicable. See [native sessions](native-sessions.md).
 
+Native workflow resume rebuilds a clean worktree child in its source directory with its history. A changed worktree is refused with its preservation branch named. A running or queued child cannot be resumed concurrently.
+
 A workflow is a small JavaScript program that spawns and coordinates many subagents: fan out over a list, push every item through the same stages, verify each result, return a summary. It runs in the background and reports as it goes.
 
 The thing worth understanding up front is that **you do not write these — the model does.** You describe the work; it emits the script; you keep the file and re-run it. This guide is about that loop.

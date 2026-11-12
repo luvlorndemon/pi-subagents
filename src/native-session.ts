@@ -1,5 +1,7 @@
-import { resolve } from "node:path";
+import { realpathSync, statSync } from "node:fs";
+import { relative, resolve } from "node:path";
 import {
+  type AgentSession,
   createAgentSession, createCodemodeExtension, createMcpExtension, createToolSearchExtension,
   DefaultResourceLoader, type ExtensionContext, getAgentDir,
   type ModelRuntime, SessionManager, SettingsManager, type ToolDefinition,
@@ -8,19 +10,31 @@ import type { RunOptions } from "./agent-runner.js";
 import { runInChildSessionContext } from "./child-context.js";
 import { captureNativeContext, withNativeContext } from "./native-context.js";
 import { nativeDelegationEnabled } from "./native-mode.js";
+import { NATIVE_WORKTREE_ENTRY, readNativeWorktree } from "./native-worktree.js";
 import { createNestedSubagentTools, getMaxSubagentDepth } from "./nested-tools.js";
 import { createStructuredCapture, createStructuredOutputTool } from "./structured-output.js";
 
 /** Session construction only. Pi owns all system-prompt generation here. */
-export async function createNativeSession(ctx: ExtensionContext, options: RunOptions, persist: boolean) {
+export async function createNativeSession(ctx: ExtensionContext, options: RunOptions, persist: boolean, previousSession?: AgentSession) {
   const snapshot = options.nativeContext ?? captureNativeContext(ctx);
-  const cwd = options.cwd ?? ctx.cwd;
   const configRoot = options.configCwd ?? ctx.cwd;
   const agentDir = getAgentDir();
   const modelRuntime = (ctx.modelRegistry as unknown as { runtime?: ModelRuntime }).runtime;
   if (!modelRuntime) throw new Error("Native subagents require pi 1.5.2's parent model runtime.");
   const settings = SettingsManager.create(configRoot, agentDir, { projectTrusted: ctx.isProjectTrusted() });
-  const sessionSettings = resolve(cwd) === resolve(configRoot) || options.worktreeBase
+  const sessionDir = process.env.PI_CODING_AGENT_SESSION_DIR ?? settings.getSessionDir();
+  const resumeFile = options.resumeSessionFile ?? previousSession?.sessionManager.getSessionFile();
+  const opened = resumeFile ? SessionManager.open(resumeFile, sessionDir) : undefined;
+  const previousManager = opened ?? previousSession?.sessionManager;
+  const worktree = previousManager ? readNativeWorktree(previousManager) : undefined;
+  const cwd = worktree?.sourceCwd ?? options.cwd ?? ctx.cwd;
+  if (worktree && !statSync(cwd).isDirectory()) throw new Error(`Cannot resume: source directory is unavailable: ${cwd}`);
+  let sameSource = false;
+  if (options.worktreeBase) {
+    try { sameSource = relative(realpathSync(ctx.cwd), realpathSync(options.worktreeBase)) === ""; }
+    catch { /* An unverifiable source cannot inherit the parent's project trust. */ }
+  }
+  const sessionSettings = resolve(cwd) === resolve(configRoot) || sameSource
     ? settings
     : Object.assign(SettingsManager.create(configRoot, agentDir, { projectTrusted: ctx.isProjectTrusted() }), { isProjectTrusted: () => false });
   const capture = options.structuredOutput ? createStructuredCapture() : undefined;
@@ -53,10 +67,9 @@ export async function createNativeSession(ctx: ExtensionContext, options: RunOpt
       throw new Error(`Could not load inherited pi-purge extension: ${error?.error ?? purgePath}`);
     }
     const parentSession = ctx.sessionManager.getSessionFile();
-    const sessionDir = process.env.PI_CODING_AGENT_SESSION_DIR ?? settings.getSessionDir();
     let sessionManager: SessionManager;
-    if (options.resumeSessionFile) {
-      sessionManager = SessionManager.open(options.resumeSessionFile, sessionDir);
+    if (resumeFile && opened) {
+      sessionManager = worktree ? SessionManager.open(resumeFile, sessionDir, cwd) : opened;
       // Pi's forkFrom header records the source child, not our owning parent.
       // Keep ownership in a non-message entry so another reopen by the same
       // parent continues this fork rather than creating a fresh fork every time.
@@ -65,15 +78,20 @@ export async function createNativeSession(ctx: ExtensionContext, options: RunOpt
         ? (ownership.data as { parentSession?: string }).parentSession
         : sessionManager.getHeader()?.parentSession;
       if (owner !== undefined && owner !== parentSession) {
-        sessionManager = SessionManager.forkFrom(options.resumeSessionFile, sessionManager.getCwd(), sessionDir);
+        sessionManager = SessionManager.forkFrom(resumeFile, cwd, sessionDir);
         sessionManager.appendCustomEntry("pi-subagents:native-owner", { parentSession });
       }
+    } else if (previousSession) {
+      sessionManager = SessionManager.inMemory(cwd, undefined, previousSession.sessionManager.getBranch());
     } else {
       sessionManager = persist ? SessionManager.create(cwd, sessionDir, { parentSession }) : SessionManager.inMemory(cwd);
     }
+    if (options.worktreeBase && !previousManager) {
+      sessionManager.appendCustomEntry(NATIVE_WORKTREE_ENTRY, { sourceCwd: options.worktreeBase, complete: false });
+    }
     const { session } = await createAgentSession({
-      cwd, agentDir, modelRuntime, model: options.model ?? ctx.model,
-      thinkingLevel: options.thinkingLevel ?? ctx.thinkingLevel,
+      cwd, agentDir, modelRuntime, model: previousSession?.model ?? options.model ?? ctx.model,
+      thinkingLevel: previousSession?.thinkingLevel ?? options.thinkingLevel ?? ctx.thinkingLevel,
       settingsManager: sessionSettings, sessionManager, resourceLoader: loader,
       customTools,
     });

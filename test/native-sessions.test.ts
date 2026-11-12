@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -94,10 +95,204 @@ async function parent(withPurge = false, respond: (context: TranscriptContext) =
     const result = await runAgent(ctx, "Explore", prompt, { ...opts, pi: api!, onSessionCreated: child => { sessions.push(child); opts.onSessionCreated?.(child); } });
     return result;
   };
-  return { api, ctx, session, requests, run, runtime };
+  const manager = (globalThis as Record<symbol, unknown>)[Symbol.for("pi-subagents:manager")] as Pick<AgentManager, "spawn" | "getRecord" | "waitForAll">;
+  return { api, ctx, session, requests, run, runtime, manager };
+}
+
+function gitFixture(cwd: string, files = ["README.md"]): void {
+  mkdirSync(cwd, { recursive: true });
+  writeFileSync(join(cwd, "README.md"), "SOURCE_CHECKOUT_CONTENT");
+  for (const args of [["init", "-q"], ["config", "user.name", "Fixture"], ["config", "user.email", "fixture@example.invalid"], ["add", "--", ...files], ["commit", "-qm", "fixture"]]) {
+    execFileSync("git", args, { cwd, stdio: "pipe" });
+  }
 }
 
 describe("native pi sessions", () => {
+  it("reopens a persisted clean worktree in the recorded source directory", async () => {
+    const source = join(root, "persistent source"); gitFixture(source);
+    writeFileSync(join(root, ".pi", "subagents.json"), JSON.stringify({ schedulingEnabled: false, workflowsEnabled: false, rememberAgents: true }));
+    const p = await parent();
+    setRememberAgents(true);
+    const id = p.manager.spawn(p.api, p.ctx, "pi", "PERSISTED_WORKTREE_TASK", { description: "saved", cwd: source, isolation: "worktree", isBackground: true });
+    await p.manager.waitForAll();
+    const file = p.manager.getRecord(id)!.sessionFile;
+    expect(file).toBeDefined();
+    const reopened = await p.run("continue saved worktree", { resumeSessionFile: file });
+    expect(reopened.session.extensionRunner.createContext().cwd).toBe(source);
+    expect(reopened.session.sessionManager.getCwd()).toBe(source);
+    expect(JSON.stringify(p.requests.at(-1))).toContain("PERSISTED_WORKTREE_TASK");
+    const read = await reopened.session.extensionRunner.createToolContext("read-source", undefined).executeTool("read", { path: "README.md" });
+    expect(read.isError).toBe(false);
+    expect(JSON.stringify(read.result)).toContain("SOURCE_CHECKOUT_CONTENT");
+  });
+
+  it.runIf(existsSync(purgePath))("keeps a clean worktree's purge snapshot when rebuilding its live session", async () => {
+    const source = join(root, "purge source"); gitFixture(source);
+    const p = await parent(true);
+    await p.session.prompt("/purge use minimal");
+    const id = p.manager.spawn(p.api, p.ctx, "pi", "snapshot worktree", { description: "snapshot", cwd: source, isolation: "worktree", isBackground: true });
+    await p.manager.waitForAll();
+    await p.session.prompt("/purge off");
+    await p.session.getToolDefinition("Agent")!.execute("resume-snapshot", { prompt: "continue snapshot", description: "resume", resume: id, run_in_background: false }, undefined, undefined, p.ctx);
+    expect(getCurrentSystemPrompt(p.requests.at(-1)!.messages)).toContain("concise technical assistant");
+    expect(p.manager.getRecord(id)!.session!.extensionRunner.createContext().cwd).toBe(source);
+  });
+
+  it("can stop a background worktree resume while its new session is being constructed", async () => {
+    const source = join(root, "paused source"); gitFixture(source);
+    const key = Symbol.for("pi-subagents:test:resume-construction");
+    const shared = globalThis as Record<symbol, unknown>;
+    let entered!: () => void;
+    let release!: () => void;
+    const ready = new Promise<void>(resolve => { entered = resolve; });
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    shared[key] = { source, entered, pending };
+    const extensionDir = join(root, ".pi", "extensions"); mkdirSync(extensionDir);
+    writeFileSync(join(extensionDir, "pause-resume.ts"), `export default pi => {
+      pi.on("session_start", async (_event, ctx) => {
+        const hook = globalThis[Symbol.for("pi-subagents:test:resume-construction")];
+        if (hook && ctx.cwd === hook.source) { hook.entered(); await hook.pending; }
+      });
+    };`);
+    try {
+      const p = await parent();
+      const id = p.manager.spawn(p.api, p.ctx, "pi", "paused worktree", { description: "paused", cwd: source, isolation: "worktree", isBackground: true });
+      await p.manager.waitForAll();
+      const calls = p.requests.length;
+      const agent = p.session.getToolDefinition("Agent")!;
+      await agent.execute("resume-paused", { prompt: "resume paused", description: "resume", resume: id, run_in_background: true }, undefined, undefined, p.ctx);
+      await ready;
+      const rejected = await agent.execute("resume-overlap", { prompt: "overlap", description: "resume", resume: id, run_in_background: false }, undefined, undefined, p.ctx);
+      expect(JSON.stringify(rejected)).toContain("still running");
+      const record = p.manager.getRecord(id)!;
+      p.api.events.emit("subagents:rpc:stop", { requestId: "stop-resume", agentId: id });
+      expect(record.status).toBe("stopped");
+      const controller = record.abortController;
+      const stoppedOverlap = await agent.execute("resume-stopped-overlap", { prompt: "overlap after stop", description: "resume", resume: id, run_in_background: true }, undefined, undefined, p.ctx);
+      expect(JSON.stringify(stoppedOverlap)).toContain("still running");
+      expect(record.status).toBe("stopped");
+      expect(record.abortController).toBe(controller);
+      release();
+      await record.promise;
+      expect(record.status).toBe("stopped");
+      expect(p.requests).toHaveLength(calls);
+    } finally {
+      release();
+      delete shared[key];
+    }
+  });
+
+  it("keeps foreign worktrees untrusted while allowing the trusted source's own worktree", async () => {
+    const server = join(root, "marker-server.mjs");
+    writeFileSync(server, `import { writeFileSync } from 'node:fs'; writeFileSync(process.argv[2], 'started');\n` + readFileSync(fileURLToPath(new URL("./fixtures/e2e-mcp-stdio-server.mjs", import.meta.url)), "utf8"));
+    const trustedMarker = join(root, "trusted-marker");
+    const foreignMarker = join(root, "foreign-marker");
+    const foreign = join(root, "foreign repo");
+    mkdirSync(join(foreign, ".pi"), { recursive: true });
+    for (const [cwd, marker] of [[root, trustedMarker], [foreign, foreignMarker]]) {
+      writeFileSync(join(cwd, ".pi", "mcp.json"), JSON.stringify({ mcpServers: { marker: { command: process.execPath, args: [server, marker], exposure: "direct" } } }));
+      gitFixture(cwd, ["README.md", ".pi/mcp.json"]);
+    }
+    const p = await parent();
+    const trusted = p.manager.spawn(p.api, p.ctx, "pi", "trusted work", { description: "trusted", isolation: "worktree", isBackground: true });
+    await p.manager.waitForAll();
+    expect(p.manager.getRecord(trusted)?.status).toBe("completed");
+    expect(existsSync(trustedMarker)).toBe(true);
+    const foreignId = p.manager.spawn(p.api, p.ctx, "pi", "foreign work", { description: "foreign", cwd: foreign, isolation: "worktree", isBackground: true });
+    await p.manager.waitForAll();
+    expect(p.manager.getRecord(foreignId)?.status).toBe("completed");
+    expect(existsSync(foreignMarker)).toBe(false);
+  });
+
+  it.each([false, true])("resumes a clean worktree in its source directory with its history (background=%s)", async background => {
+    const source = join(root, "source repo"); gitFixture(source);
+    const p = await parent(false, context => {
+      if (JSON.stringify(context.messages).includes("RESUME_READ") && !context.messages.some(message => message.role === "toolResult")) {
+        return [{ type: "toolCall", id: "resume-read", name: "read", arguments: { path: "README.md" } }];
+      }
+      return "finished";
+    });
+    const id = p.manager.spawn(p.api, p.ctx, "pi", "ORIGINAL_TASK", { description: "clean worktree", cwd: source, isolation: "worktree", isBackground: true });
+    await p.manager.waitForAll();
+    expect(p.manager.getRecord(id)?.worktreeResult?.hasChanges).toBe(false);
+    const tool = p.session.getToolDefinition("Agent")!;
+    await tool.execute("resume-clean", { prompt: "RESUME_READ", description: "resume", resume: id, run_in_background: background }, undefined, undefined, p.ctx);
+    await p.manager.waitForAll();
+    const record = p.manager.getRecord(id)!;
+    const read = record.session!.messages.find(message => message.role === "toolResult" && message.toolName === "read");
+    expect(read).toMatchObject({ isError: false });
+    expect(JSON.stringify(read)).toContain("SOURCE_CHECKOUT_CONTENT");
+    expect(JSON.stringify(p.requests.at(-1))).toContain("ORIGINAL_TASK");
+    expect(record.session!.extensionRunner.createContext().cwd).toBe(source);
+  });
+
+  it("refuses to resume a changed worktree and preserves its completed result", async () => {
+    const source = join(root, "changed repo"); gitFixture(source);
+    const p = await parent(false, context => context.messages.some(message => message.role === "toolResult") ? "changed" : [{ type: "toolCall", id: "change", name: "write", arguments: { path: "change.txt", content: "saved on branch" } }]);
+    const id = p.manager.spawn(p.api, p.ctx, "pi", "make change", { description: "changed worktree", cwd: source, isolation: "worktree", isBackground: true });
+    await p.manager.waitForAll();
+    const record = p.manager.getRecord(id)!;
+    expect(record.worktreeResult?.hasChanges).toBe(true);
+    const priorResult = record.result;
+    const calls = p.requests.length;
+    const result = await p.session.getToolDefinition("Agent")!.execute("resume-changed", { prompt: "continue", description: "resume", resume: id, run_in_background: false }, undefined, undefined, p.ctx);
+    expect(JSON.stringify(result)).toContain("worktree");
+    expect(JSON.stringify(result)).toContain(record.worktreeResult!.branch!);
+    expect(p.requests).toHaveLength(calls);
+    expect(record.result).toBe(priorResult);
+    expect(record.status).toBe("completed");
+  });
+
+  it("refuses a foreground resume of a running task without replacing its controller or result", async () => {
+    let entered!: () => void;
+    let release!: (value: string) => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const p = await parent(false, () => new Promise<string>(resolve => { release = resolve; entered(); }));
+    const id = p.manager.spawn(p.api, p.ctx, "pi", "hold task", { description: "held", isBackground: true });
+    await started;
+    const record = p.manager.getRecord(id)!;
+    const originalPromise = record.promise;
+    const controller = record.abortController;
+    try {
+      const result = await p.session.getToolDefinition("Agent")!.execute("resume-busy", { prompt: "continue", description: "resume", resume: id, run_in_background: false }, undefined, undefined, p.ctx);
+      expect(JSON.stringify(result)).toContain("still running");
+      expect(record.status).toBe("running");
+      expect(record.abortController).toBe(controller);
+      expect(record.error).toBeUndefined();
+      expect(record.session!.isStreaming).toBe(true);
+    } finally {
+      release("finished");
+      await originalPromise;
+    }
+  });
+
+  it("enforces the running and queued resume guard at the manager boundary", async () => {
+    let entered!: () => void;
+    let release!: (text: string) => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const p = await parent(false, () => new Promise<string>(resolve => { release = resolve; entered(); }));
+    const manager = new AgentManager(); managers.push(manager);
+    manager.setMaxConcurrent(1);
+    const id = manager.spawn(p.api, p.ctx, "pi", "running", { description: "running", isBackground: true });
+    await started;
+    const queued = manager.spawn(p.api, p.ctx, "pi", "queued", { description: "queued", isBackground: true });
+    const record = manager.getRecord(id)!;
+    const controller = record.abortController;
+    const promise = record.promise;
+    try {
+      expect(await manager.resume(id, "overlap")).toBeUndefined();
+      expect(await manager.resume(id, "overlap", undefined, { isBackground: true })).toBeUndefined();
+      expect(await manager.resume(queued, "overlap")).toBeUndefined();
+      expect(record.status).toBe("running");
+      expect(record.abortController).toBe(controller);
+      expect(record.promise).toBe(promise);
+      expect(manager.getRecord(queued)!.status).toBe("queued");
+    } finally {
+      manager.abort(queued);
+      release("finished");
+      await promise;
+    }
+  });
   it("does not reset delegation when the extension is discovered by a child", async () => {
     const p = await parent();
     setNativeDelegation(true);

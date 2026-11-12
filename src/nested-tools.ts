@@ -8,6 +8,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { abortable } from "./abortable.js";
+import { liveResumeRefusal } from "./agent-record-entry.js";
 import {
   buildAgentRegistry,
   getAgentConfigIn,
@@ -187,6 +188,8 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
         if (!ownsRecord(existing, context.parentAgentId)) {
           return textResult(`Nested agent not found or not owned by this parent: "${params.resume}".`, true);
         }
+        const refusal = liveResumeRefusal(existing);
+        if (refusal) return textResult(`Nested agent "${params.resume}" ${refusal}`, true);
         // Frontmatter authoritative, as on the spawn path; the manager falls
         // back to the limit the child was spawned with, then the default.
         const resumed = await context.manager.resume(params.resume, params.prompt, signal, {

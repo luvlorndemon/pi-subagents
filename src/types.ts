@@ -192,6 +192,8 @@ export interface AgentRecord {
   session?: AgentSession;
   abortController?: AbortController;
   promise?: Promise<string>;
+  /** A resume is still settling, even if an external stop already changed status. */
+  resumeInProgress?: boolean;
   /**
    * A caller is awaiting this agent inline (`spawnAndWait`) — what
    * `maxConcurrentForeground` bounds. Distinct from `isBackground === false`,

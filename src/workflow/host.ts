@@ -35,7 +35,7 @@
 import { existsSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentManager } from "../agent-manager.js";
-import { reopenTarget, worktreeLost } from "../agent-record-entry.js";
+import { liveResumeRefusal, reopenTarget, worktreeLost } from "../agent-record-entry.js";
 import { getAgentConfig, resolveSpawnType } from "../agent-types.js";
 import { resolveModel } from "../model-resolver.js";
 import { checkModelScope } from "../model-scope.js";
@@ -431,6 +431,9 @@ export function createWorkflowHost(deps: WorkflowHostOptions): WorkflowHost {
       if (id === undefined) {
         return { ok: false, error: `Cannot resume "${agentId}" — it never started.` };
       }
+      const existing = manager.getRecord(id);
+      const refusal = existing ? liveResumeRefusal(existing) : undefined;
+      if (refusal) return { ok: false, error: `Agent ${id} ${refusal}` };
       const record = await manager.resume(id, prompt, deps.signal);
       // No live session: the manager evicted the child, or it never got as far
       // as having one. `reopenAgent` refuses the second with the reason — and a
