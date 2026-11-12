@@ -551,7 +551,7 @@ export class AgentManager {
   ): string {
     if (isNativeSessionMode()) {
       type = NATIVE_SESSION_TYPE;
-      options = { ...options, nativeContext: captureNativeContext(pi, ctx) };
+      options = { ...options, nativeContext: captureNativeContext(ctx) };
     }
     // Validate before the queue branch — a queued spawn should fail at the
     // call, not minutes later at drain. Throw (not warn): programmatic callers

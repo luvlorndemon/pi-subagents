@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Native-session fork entry.** The package uses Pi's native system prompt without persona definitions, preserves orchestration, and snapshots the parent's live pi-purge configuration for each child. Nested delegation defaults off (`nativeDelegation`); see `docs/native-sessions.md` for migration and upstream maintenance.
 - **`maxConcurrentNested` caps how many nested subagents run at once** ([#427](https://github.com/tintinweb/pi-subagents/pull/427), part of [#352](https://github.com/tintinweb/pi-subagents/issues/352)). Nested children skip both queueing pools, so nothing bounded a parent's fan-out. A nested spawn over the limit (default `10`, `0` = unlimited) is refused rather than queued, since queueing a child behind its waiting parent would deadlock. Top-level and workflow agents neither count nor are refused. In `/agents → Settings`, "Max concurrency" is now "Max background concurrency", next to the new "Max nested concurrency" and "Nested depth".
 
+### Removed
+- **Extra tool restrictions in native child sessions.** Children now load tools through Pi and its extensions, including pi-purge, instead of a snapshot of the parent's active tools. Removed the static tool allowlist/denylist and both custom call gates, restoring deferred/codemode tools and native MCP discovery.
+
 ## [0.23.2] - 2026-11-10
 
 ### Added

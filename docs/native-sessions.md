@@ -7,7 +7,7 @@ For users and maintainers of `luvlorndemon/pi-subagents`. This document describe
 1. Pi creates an ordinary session and assembles its system prompt. This fork never copies the parent's `ctx.getSystemPrompt()` and never adds a persona or workflow role prefix.
 2. The parent's task becomes the child's user message. `inherit_context` explicitly prepends the existing text export of the parent conversation, excluding tool results and images. This is not a full session fork.
 3. Native project instructions, settings, skills and extensions still apply. A `SYSTEM.md` or another extension can therefore change the prompt, as in an ordinary Pi session.
-4. Model and thinking inherit unless specified. Children cannot use tools outside the parent's selected scope at spawn; deferred calls are checked too. StructuredOutput and explicitly enabled nested orchestration tools are added for those features. Tool selection is not an OS sandbox.
+4. Model and thinking inherit unless specified. Pi's native settings and loaded extensions determine the child's tools, including pi-purge's configured loadout and deferred/codemode/MCP tools. The parent's temporary active-tool selection is not copied as a child allowlist. This fork adds no tool allowlist, denylist or per-call permission checks; Pi, other extensions and operating-system permissions retain their normal behavior. StructuredOutput and explicitly enabled nested orchestration tools are added for those features.
 
 The runtime/display name `pi` identifies a session. It has no registered persona, role prompt or role default model. Project/user/package agent definitions are ignored and left on disk. Default-agent, fallback-agent, strict-agent-file, package-agent and custom Agent-description settings have no effect. Their menu rows and the persona creation action are hidden.
 
@@ -43,7 +43,7 @@ npm ci --ignore-scripts
 npm run check
 ```
 
-Development dependencies pin Pi 1.5.2. Native tests use the real SDK with an offline scripted provider and temporary config/auth paths. They cover prompt assembly, context opt-in, foreground/background, resume, queue snapshots, nested scope/depth, RPC, schedules, workflows, concurrent pi-purge continuation and cancellation.
+Development dependencies pin Pi 1.5.2. Native tests use the real SDK with an offline scripted provider and temporary config/auth paths. They cover prompt assembly, context opt-in, foreground/background, resume, queue snapshots, native tools in nested sessions, delegation depth, RPC, schedules, workflows, concurrent pi-purge continuation and cancellation. Tool regressions exercise writes absent from the parent's active selection, deferred/codemode extension calls, real stdio MCP discovery through tool_search, and preservation of another extension's tool_call hook.
 
 Companion tests use `../pi-purge/src/index.ts` by default; set `PI_PURGE_EXTENSION` to override it. Only companion cases are skipped when that file is absent. Upstream tests exercise the preserved original entry. Windows fixture tests use native paths and async cleanup retries. Live model tests remain opt-in. macOS/Linux have not been verified on a real machine for this fork.
 

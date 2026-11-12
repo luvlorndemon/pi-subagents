@@ -3,7 +3,7 @@ import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type AssistantMessage, createAssistantMessageEventStream, getCurrentSystemPrompt, getCurrentTools, type TranscriptContext } from "@earendil-works/pi-ai";
+import { type AssistantMessage, createAssistantMessageEventStream, getCurrentSystemPrompt, getCurrentTools, type ToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
 import { type AgentSession, createAgentSession, DefaultResourceLoader, type ExtensionAPI, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentManager } from "../src/agent-manager.js";
@@ -30,6 +30,7 @@ beforeEach(() => {
   vi.spyOn(process, "cwd").mockReturnValue(root);
   vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent-home"));
   mkdirSync(join(root, ".pi", "agents"), { recursive: true });
+  writeFileSync(join(root, ".pi", "settings.json"), JSON.stringify({ defaultTools: ["read", "write"] }));
   writeFileSync(join(root, ".pi", "subagents.json"), JSON.stringify({ schedulingEnabled: false, workflowsEnabled: false, rememberAgents: false }));
   writeFileSync(join(root, ".pi", "agents", "Explore.md"), "---\nmodel: broken/model\ninherit_context: true\n---\nPERSONA_SENTINEL");
   writeFileSync(join(root, "AGENTS.md"), "NATIVE_PROJECT_RULE");
@@ -54,7 +55,8 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
-async function parent(withPurge = false, respond: (context: TranscriptContext) => string | Promise<string> = () => "finished") {
+type FixtureResponse = string | ToolCall[];
+async function parent(withPurge = false, respond: (context: TranscriptContext) => FixtureResponse | Promise<FixtureResponse> = () => "finished") {
   const requests: TranscriptContext[] = [];
   const agentDir = join(root, "agent-home");
   const runtime = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: null, modelsStorePath: join(agentDir, "models"), allowModelNetwork: false, refreshOnCreate: false });
@@ -65,12 +67,13 @@ async function parent(withPurge = false, respond: (context: TranscriptContext) =
       requests.push(structuredClone(context));
       const stream = createAssistantMessageEventStream();
       let ended = false;
-      const finish = (text: string, aborted = false) => {
+      const finish = (response: FixtureResponse, aborted = false) => {
         if (ended) return; ended = true;
-        const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: model.provider, model: model.id, timestamp: Date.now(), content: [{ type: "text", text }], stopReason: aborted ? "aborted" : "stop", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
+        const reason = typeof response === "string" ? "stop" : "toolUse";
+        const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: model.provider, model: model.id, timestamp: Date.now(), content: typeof response === "string" ? [{ type: "text", text: response }] : response, stopReason: aborted ? "aborted" : reason, usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
         stream.push({ type: "start", partial: message });
         if (aborted) stream.push({ type: "error", reason: "aborted", error: message });
-        else stream.push({ type: "done", reason: "stop", message });
+        else stream.push({ type: "done", reason, message });
       };
       options?.signal?.addEventListener("abort", () => finish("", true), { once: true });
       Promise.resolve(respond(context)).then(text => finish(text));
@@ -135,15 +138,20 @@ describe("native pi sessions", () => {
     expect(prompt).toContain("NATIVE_PROJECT_RULE");
     expect(prompt).not.toContain("PERSONA_SENTINEL");
     expect(JSON.stringify(p.requests[0])).not.toContain("PARENT_CHAT_SENTINEL");
-    expect(result.session.getActiveToolNames()).toEqual(["read"]);
+    expect(result.session.getActiveToolNames()).toEqual(["read", "write"]);
+    expect(p.session.getActiveToolNames()).not.toContain("write");
+    const childTools = result.session.extensionRunner.createToolContext("native-write", undefined);
+    const written = await childTools.executeTool("write", { path: "child-output.txt", content: "native tools" });
+    expect(written.isError).toBe(false);
+    expect(readFileSync(join(root, "child-output.txt"), "utf8")).toBe("native tools");
     await p.run("context task", { inheritContext: true });
     expect(JSON.stringify(p.requests[1])).toContain("PARENT_CHAT_SENTINEL");
   });
 
-  it.runIf(existsSync(purgePath))("inherits unsaved purge snapshots without duplicate injection or widened tools", async () => {
+  it.runIf(existsSync(purgePath))("inherits unsaved purge snapshots and lets purge apply its own tool loadout", async () => {
     const p = await parent(true);
     await p.session.prompt("/purge use minimal");
-    const snapshot = captureNativeContext(p.api, p.ctx);
+    const snapshot = captureNativeContext(p.ctx);
     expect(snapshot.purge).toBeDefined();
     await p.session.prompt("/purge off");
     const inherited = await p.run("snapshot task", { nativeContext: snapshot });
@@ -151,11 +159,12 @@ describe("native pi sessions", () => {
     expect(getCurrentSystemPrompt(p.requests[0].messages).match(/concise technical assistant/g)).toHaveLength(1);
     expect(getCurrentSystemPrompt(p.requests[1].messages)).not.toContain("concise technical assistant");
     expect(ordinary.responseText).toBe("finished");
-    expect(inherited.session.getActiveToolNames()).toEqual(["read"]);
-    const childTools = inherited.session.extensionRunner.createToolContext("scope-test", undefined);
-    const blocked = await childTools.executeTool("write", { path: "must-not-exist.txt", content: "blocked" });
-    expect(blocked.isError).toBe(true);
-    expect(existsSync(join(root, "must-not-exist.txt"))).toBe(false);
+    expect(inherited.session.getActiveToolNames()).toEqual(expect.arrayContaining(["read", "write", "purge_read"]));
+    expect(ordinary.session.getActiveToolNames()).not.toContain("purge_read");
+    const childTools = inherited.session.extensionRunner.createToolContext("purge-loadout-test", undefined);
+    const written = await childTools.executeTool("write", { path: "purge-output.txt", content: "purge loadout" });
+    expect(written.isError).toBe(false);
+    expect(readFileSync(join(root, "purge-output.txt"), "utf8")).toBe("purge loadout");
   });
 
   it.runIf(existsSync(purgePath))("uses parent profile files but the actual worktree cwd", async () => {
@@ -231,7 +240,7 @@ describe("native pi sessions", () => {
     expect(p.requests).toHaveLength(2);
   });
 
-  it("limits nested sessions to the immediate parent's tool scope and depth", async () => {
+  it("uses native tools in nested sessions while keeping the delegation depth limit", async () => {
     const p = await parent();
     setNativeDelegation(true);
     const manager = new AgentManager();
@@ -239,14 +248,68 @@ describe("native pi sessions", () => {
     const child = await p.run("parent child", { nestedRuntime: { manager, parentAgentId: "owner", depth: 1, maxSubagentDepth: 2 } });
     const nestedAgent = child.session.getToolDefinition("Agent")!;
     expect(nestedAgent.parameters).not.toHaveProperty("properties.subagent_type");
-    // Parent/root allows read, immediate child has relinquished every tool
-    // except orchestration. The grandchild must not recover root's read tool.
+    // The immediate parent's temporary active selection is not a child allowlist.
     child.session.setActiveToolsByName(["Agent"]);
     const childCtx = child.session.extensionRunner.createToolContext("nested-fixture", undefined);
     const result = await nestedAgent.execute("nested", { prompt: "grandchild", description: "grandchild" }, undefined, undefined, childCtx);
     expect(JSON.stringify(result)).toContain("finished");
     const grandchildRequest = p.requests.at(-1)!;
-    expect(getCurrentTools(grandchildRequest.messages)).toEqual([]);
+    const names = getCurrentTools(grandchildRequest.messages).map(tool => tool.name);
+    expect(names).toEqual(["read", "write"]);
+    expect(names).not.toContain("Agent");
+  });
+
+  it("loads callable deferred and codemode extension tools without a parent allowlist", async () => {
+    const directory = join(root, ".pi", "extensions"); mkdirSync(directory);
+    writeFileSync(join(directory, "native-tools.ts"), `export default pi => {
+      for (const exposure of ["deferred", "codemode"]) pi.registerTool({
+        name: "fixture_" + exposure, label: exposure, description: "Offline callable fixture", exposure,
+        parameters: { type: "object", properties: {} },
+        execute: async () => ({ content: [{ type: "text", text: "CALLED " + exposure }], details: {} })
+      });
+    };`);
+    const p = await parent();
+    const child = await p.run("extension task");
+    const ctx = child.session.extensionRunner.createToolContext("extension-tools", undefined);
+    for (const exposure of ["deferred", "codemode"]) {
+      expect(p.session.getActiveToolNames()).not.toContain(`fixture_${exposure}`);
+      const result = await ctx.executeTool(`fixture_${exposure}`, {});
+      expect(result.isError).toBe(false);
+      expect(JSON.stringify(result.result)).toContain(`CALLED ${exposure}`);
+    }
+  });
+
+  it("discovers and calls a real deferred MCP tool through Pi's native tool_search", async () => {
+    const agentDir = join(root, "agent-home"); mkdirSync(agentDir);
+    const server = fileURLToPath(new URL("./fixtures/e2e-mcp-stdio-server.mjs", import.meta.url));
+    writeFileSync(join(agentDir, "mcp.json"), JSON.stringify({ mcpServers: { fixture: { command: process.execPath, args: [server], exposure: "deferred" } } }));
+    writeFileSync(join(root, ".pi", "settings.json"), JSON.stringify({ defaultTools: ["read", "write", "tool_search"] }));
+    const p = await parent(false, context => {
+      const results = context.messages.filter(message => message.role === "toolResult");
+      if (!results.some(message => message.toolName === "tool_search")) return [{ type: "toolCall", id: "discover", name: "tool_search", arguments: { query: "mcp__fixture__echo" } }];
+      if (!results.some(message => message.toolName === "mcp__fixture__echo")) return [{ type: "toolCall", id: "echo", name: "mcp__fixture__echo", arguments: { text: "native mcp" } }];
+      return "finished";
+    });
+    const child = await p.run("discover and call echo");
+    const echo = child.session.messages.find(message => message.role === "toolResult" && message.toolName === "mcp__fixture__echo");
+    expect(echo).toMatchObject({ isError: false });
+    expect(JSON.stringify(echo)).toContain("echo: native mcp");
+    expect(getCurrentTools(p.requests.at(-1)!.messages).map(tool => tool.name)).toContain("mcp__fixture__echo");
+  });
+
+  it("retains another extension's native tool_call hook", async () => {
+    const directory = join(root, ".pi", "extensions"); mkdirSync(directory);
+    writeFileSync(join(directory, "write-policy.ts"), `export default pi => {
+      pi.on("tool_call", event => event.toolName === "write" ? { block: true, reason: "FIXTURE_WRITE_POLICY" } : undefined);
+    };`);
+    const p = await parent();
+    const child = await p.run("policy task");
+    expect(child.session.getActiveToolNames()).toContain("write");
+    const ctx = child.session.extensionRunner.createToolContext("native-policy", undefined);
+    const blocked = await ctx.executeTool("write", { path: "policy-blocked.txt", content: "not written" });
+    expect(blocked.isError).toBe(true);
+    expect(JSON.stringify(blocked.result)).toContain("FIXTURE_WRITE_POLICY");
+    expect(existsSync(join(root, "policy-blocked.txt"))).toBe(false);
   });
 
   it("runs workflow tasks and resumes without loading an agentType", async () => {
@@ -309,7 +372,7 @@ describe("native pi sessions", () => {
 
   it.runIf(existsSync(purgePath))("reports a missing inherited purge extension instead of silently losing the snapshot", async () => {
     const p = await parent(true);
-    const snapshot = captureNativeContext(p.api, p.ctx);
+    const snapshot = captureNativeContext(p.ctx);
     snapshot.purge!.extensionPath = join(root, "missing-purge.ts");
     await expect(p.run("must inherit", { nativeContext: snapshot })).rejects.toThrow("Could not load inherited pi-purge");
     expect(p.requests).toHaveLength(0);

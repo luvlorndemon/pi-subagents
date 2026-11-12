@@ -161,7 +161,7 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
   const agentTool = defineTool({
     name: NESTED_TOOL_NAMES[0],
     label: "Agent",
-    description: isNativeSessionMode() ? "Delegate a self-contained task to an independent native pi session. No persona is selected. Ownership, tool scope and depth limits apply." :
+    description: isNativeSessionMode() ? "Delegate a self-contained task to an independent native pi session. No persona is selected. Tools follow pi's native settings and extensions. Task ownership and nesting depth limits apply." :
       "Launch a child-safe nested subagent for bounded delegated work. " +
       "Only use agent types allowed by this parent agent; nesting is depth-limited.",
     parameters: Type.Object({

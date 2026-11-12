@@ -26,7 +26,7 @@ Load only one copy of pi-subagents. The package entry is `src/native.ts`; direct
 Agent({ prompt: "Read the failing test and explain the cause. Do not edit files.", description: "Find failure cause", run_in_background: false })
 ```
 
-Default context is task-only. `inherit_context: true` explicitly adds a text snapshot of the parent conversation, excluding tool results and images. It never copies the parent's system prompt. Model/thinking inherit unless overridden; tools remain within the parent's selected scope.
+Default context is task-only. `inherit_context: true` explicitly adds a text snapshot of the parent conversation, excluding tool results and images. It never copies the parent's system prompt. Model/thinking inherit unless overridden. Tools follow Pi's native settings and loaded extensions, including pi-purge; this fork adds no tool allowlist, denylist or per-call permission checks.
 
 No agent definition files are loaded. `subagent_type` is absent from the tool schema; old supplied values are ignored. RPC `type` and workflow `agentType` are also ignored. Names are task handles, not personas. Native Pi project instructions, skills and extensions still apply.
 

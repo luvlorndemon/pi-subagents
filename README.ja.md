@@ -2,6 +2,8 @@
 
 この fork は Pi 1.5.2 の標準セッションを起動し、プリセットとカスタムのペルソナを使用しません。親の会話は既定では継承せず、`inherit_context` で指定します。ネストした委譲は `nativeDelegation` で有効化します。pi-purge の設定は子ごとにコピーされます。Node.js >=22.19.0 が必要です。
 
+ツールは Pi と読み込まれた拡張（pi-purge を含む）の設定に従います。この fork は親のツール許可リストをコピーせず、追加のツール禁止リストや呼び出し権限チェックも設けません。
+
 [インストールと使用方法 (EN)](README.md#install-this-fork) · [fork の詳細 (EN)](docs/native-sessions.md)。以下は上流版の参考資料です。ペルソナ、エージェント定義、twin プロンプト、元の npm インストール方法はこの fork に適用されません。パッケージのエントリは `src/native.ts` です。
 
 # @tintinweb/pi-subagents

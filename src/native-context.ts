@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 /** Versioned, in-process bridge shared with pi-purge; never copies prompts. */
 export interface PurgeSnapshot {
@@ -10,7 +10,6 @@ export interface PurgeSnapshot {
   extensionPath: string;
 }
 export interface NativeSpawnContext {
-  activeTools: string[];
   purge?: PurgeSnapshot;
 }
 const REGISTRY = Symbol.for("pi-purge:session-snapshots:v1");
@@ -19,11 +18,10 @@ const shared = globalThis as typeof globalThis & { [key: symbol]: unknown };
 shared[CHILD] ??= new AsyncLocalStorage<NativeSpawnContext>();
 const childContext = shared[CHILD] as AsyncLocalStorage<NativeSpawnContext>;
 
-export function captureNativeContext(pi: ExtensionAPI, ctx: ExtensionContext): NativeSpawnContext {
+export function captureNativeContext(ctx: ExtensionContext): NativeSpawnContext {
   const providers = shared[REGISTRY] as Map<string, () => PurgeSnapshot> | undefined;
   const purge = providers?.get(ctx.sessionManager.getSessionId())?.();
   return {
-    activeTools: pi.getActiveTools().filter(name => !["Agent", "SubagentWorkflow", "get_subagent_result", "steer_subagent"].includes(name)),
     ...(purge ? { purge: structuredClone(purge) } : {}),
   };
 }
