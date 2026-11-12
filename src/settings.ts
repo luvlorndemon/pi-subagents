@@ -9,6 +9,8 @@ import { NO_FALLBACK } from "./agent-types.js";
 import type { AgentMentionMode, JoinMode, ViewerMarkdownMode, WidgetMode } from "./types.js";
 
 export interface SubagentsSettings {
+  /** Native-session entry only. Opt in to scoped nested delegation; default false. */
+  nativeDelegation?: boolean;
   maxConcurrent?: number;
   /**
    * Max concurrent FOREGROUND (blocking) agents — `0` = unlimited, the default,
@@ -351,6 +353,7 @@ export type ToolDescriptionMode = "full" | "compact" | "custom";
 
 /** Setter hooks used by applySettings to wire persisted values into in-memory state. */
 export interface SettingsAppliers {
+  setNativeDelegation?: (enabled: boolean) => void;
   setMaxConcurrent: (n: number) => void;
   setMaxConcurrentForeground: (n: number) => void;
   setMaxConcurrentNested: (n: number) => void;
@@ -421,6 +424,7 @@ function sanitize(raw: unknown): SubagentsSettings {
   if (!raw || typeof raw !== "object") return {};
   const r = raw as Record<string, unknown>;
   const out: SubagentsSettings = {};
+  if (typeof r.nativeDelegation === "boolean") out.nativeDelegation = r.nativeDelegation;
   if (
     Number.isInteger(r.maxConcurrent) &&
     (r.maxConcurrent as number) >= 1 &&
@@ -588,6 +592,7 @@ export function saveSettings(s: SubagentsSettings, cwd: string = process.cwd()):
 
 /** Apply persisted settings to the in-memory state via caller-supplied setters. */
 export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers): void {
+  if (typeof s.nativeDelegation === "boolean") appliers.setNativeDelegation?.(s.nativeDelegation);
   if (typeof s.maxConcurrent === "number") appliers.setMaxConcurrent(s.maxConcurrent);
   if (typeof s.maxConcurrentForeground === "number") {
     appliers.setMaxConcurrentForeground(s.maxConcurrentForeground);

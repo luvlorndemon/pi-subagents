@@ -12,7 +12,7 @@
  * (no network). The same runner also drives a real LLM when PI_E2E_LIVE=1 — the
  * `live` describe below is a smoke test for that opt-in path.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Context, getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
@@ -27,6 +27,7 @@ import {
   routeBySession,
   runPrintMode,
 } from "./helpers/print-mode-runner.js";
+import { removeTempDir } from "./helpers/temp-dir.js";
 
 // Real pi-mono (loader + dynamic extension import + two live sessions) — a cold
 // run under full-suite CPU contention can exceed vitest's 5s default.
@@ -41,7 +42,7 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
   afterEach(async () => {
     await run?.dispose();
     run = undefined;
-    for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+    for (const d of tmpDirs.splice(0)) await removeTempDir(d);
   });
 
   // The one assumption the model/thinking display rests on, checked against a

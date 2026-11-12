@@ -19,6 +19,7 @@ import { loadCustomAgents } from "./custom-agents.js";
 import { isolationParam, resolveAgentInvocationConfig } from "./invocation-config.js";
 import { resolveModel } from "./model-resolver.js";
 import { checkModelScope } from "./model-scope.js";
+import { isNativeSessionMode, omitPersonaParameter } from "./native-mode.js";
 import {
   createOutputFilePath,
   getOutputTranscriptDefault,
@@ -160,7 +161,7 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
   const agentTool = defineTool({
     name: NESTED_TOOL_NAMES[0],
     label: "Agent",
-    description:
+    description: isNativeSessionMode() ? "Delegate a self-contained task to an independent native pi session. No persona is selected. Ownership, tool scope and depth limits apply." :
       "Launch a child-safe nested subagent for bounded delegated work. " +
       "Only use agent types allowed by this parent agent; nesting is depth-limited.",
     parameters: Type.Object({
@@ -422,5 +423,6 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
     },
   });
 
+  omitPersonaParameter(agentTool.parameters);
   return [agentTool, resultTool, steerTool];
 }

@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -1136,7 +1136,7 @@ describe("agent-runner session persistence", () => {
 
     expect(sessionManagerCreate).toHaveBeenCalledWith(
       "/repo",
-      "/repo/.seams/pi-sessions/seam-plan-reviewer",
+      resolve("/repo", ".seams/pi-sessions/seam-plan-reviewer"),
       { parentSession: "/sessions/parent.jsonl" },
     );
   });
@@ -2119,7 +2119,7 @@ describe("parseExtensionsSpec", () => {
   });
   it("resolves a relative path against cwd and adds its canonical name", () => {
     const spec = parseExtensionsSpec(["./rel/foo.ts"], "/work");
-    expect(spec.paths).toEqual(["/work/rel/foo.ts"]);
+    expect(spec.paths).toEqual([resolve("/work", "rel/foo.ts")]);
     expect(spec.names).toEqual(new Set(["foo"]));
   });
   it("keeps an absolute path as-is", () => {

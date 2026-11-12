@@ -411,7 +411,9 @@ describe("cleanupWorktree — failure path", () => {
     const wt = (await createWorktree(pi, repoDir, "corrupt"))!;
     writeFileSync(join(wt.path, "work.txt"), "agent output");
     // Break the worktree's link back to the repo.
-    writeFileSync(join(wt.path, ".git"), "gitdir: /nonexistent/path/that/is/not/a/repo");
+    // Git marks this file hidden on Windows; opening an existing hidden file
+    // with the default truncating flag fails before the corruption is tested.
+    writeFileSync(join(wt.path, ".git"), "gitdir: /nonexistent/path/that/is/not/a/repo", { flag: "r+" });
 
     const result = await cleanupWorktree(pi, repoDir, wt, "corrupted agent");
 
@@ -486,15 +488,17 @@ describe("worktree isolation switch", () => {
   // The switch gates callers; it deliberately does not disarm createWorktree
   // itself, so a caller that has already decided (agent-manager checks first)
   // still gets a real worktree rather than a silent no-op.
-  it("does not disable createWorktree directly", () => {
+  it("does not disable createWorktree directly", async () => {
     const repoDir = initGitRepo();
+    const pi = mockPi();
     try {
       setWorktreeIsolationEnabled(false);
-      const wt = createWorktree(repoDir, "switch-test");
+      const wt = await createWorktree(pi, repoDir, "switch-test");
       expect(wt).toBeDefined();
-      cleanupWorktree(repoDir, wt!, "switch test");
+      expect(existsSync(wt!.path)).toBe(true);
+      await cleanupWorktree(pi, repoDir, wt!, "switch test");
     } finally {
-      pruneWorktrees(repoDir);
+      await pruneWorktrees(pi, repoDir);
       rmSync(repoDir, { recursive: true, force: true });
     }
   });

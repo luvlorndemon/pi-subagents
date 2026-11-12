@@ -27,9 +27,13 @@ import { buildParentContext, extractText } from "./context.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import { detectEnv } from "./env.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
+import type { NativeSpawnContext } from "./native-context.js";
+import { isNativeSessionMode } from "./native-mode.js";
+import { createNativeSession } from "./native-session.js";
 import { createNestedSubagentTools, getMaxSubagentDepth, type NestedAgentManager } from "./nested-tools.js";
 import { buildAgentPrompt, inheritableParentPrompt, type PromptExtras } from "./prompts.js";
 import { preloadSkills } from "./skill-loader.js";
+import type { StructuredCapture } from "./structured-output.js";
 import { createStructuredCapture, createStructuredOutputTool, structuredRetryPrompt } from "./structured-output.js";
 import type { SubagentType, ThinkingLevel } from "./types.js";
 import type { LifetimeUsage } from "./usage.js";
@@ -498,6 +502,7 @@ export interface ToolActivity {
 }
 
 export interface RunOptions {
+  nativeContext?: NativeSpawnContext;
   /** ExtensionAPI instance — used for pi.exec() instead of execSync. */
   pi: ExtensionAPI;
   /** Manager-assigned id; suffixes session name to disambiguate parallel spawns (e.g. `Explore#a1b2c3d4`). */
@@ -803,6 +808,10 @@ export async function runAgent(
   prompt: string,
   options: RunOptions,
 ): Promise<RunResult> {
+  if (isNativeSessionMode()) {
+    const { session, structuredCapture } = await createNativeSession(ctx, options, options.nested ? false : rememberAgents);
+    return executeSessionPrompt(ctx, type, prompt, options, session, structuredCapture);
+  }
   const config = getConfig(type);
   const agentConfig = getAgentConfig(type);
 
@@ -1322,6 +1331,13 @@ export async function runAgent(
     });
   }
 
+  return executeSessionPrompt(ctx, type, prompt, options, session, structuredCapture);
+}
+
+async function executeSessionPrompt(
+  ctx: ExtensionContext, type: SubagentType, prompt: string, options: RunOptions,
+  session: AgentSession, structuredCapture?: StructuredCapture,
+): Promise<RunResult> {
   options.onSessionCreated?.(session);
 
   const run = observeRun(session, { ...options, maxTurns: resolveEffectiveMaxTurns(type, options.maxTurns) });

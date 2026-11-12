@@ -1,4 +1,12 @@
-# @tintinweb/pi-subagents
+# @luvlorndemon/pi-subagents：原生 Pi 子会话
+
+本 fork 已停用全部预设和自定义 Agent 人设；子代理使用 Pi 原生提示词，由主代理通过任务消息分配工作。默认不带主对话，`inherit_context` 才显式带入文本上下文。调度、并发、前后台、结果、引导、停止、恢复与工作流保留；嵌套分派默认关闭，可用 `nativeDelegation` 开启。
+
+适配 Pi **1.5.2**，需要 Node.js **>=22.19.0**。配套 pi-purge 会传递主会话当前配置的独立快照，包括未保存改动。详见 [fork 安装与使用](README.md#install-this-fork) 和 [原生会话、pi-purge 兼容与上游更新说明](docs/native-sessions.md)。尚未发布 npm 包，请通过本 fork 的 Git 地址或本地目录安装。
+
+**下面保留的是上游文档**：其中人设、Agent 定义文件、角色记忆、twin 提示词及原版 npm 安装命令不适用于本 fork。使用包目录或 `src/native.ts` 加载；`src/index.ts` 是上游参考入口。
+
+# @tintinweb/pi-subagents（上游参考）
 
 <!-- full-readme: README.md · https://github.com/tintinweb/pi-subagents/blob/master/README.md -->
 

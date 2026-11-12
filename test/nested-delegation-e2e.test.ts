@@ -30,6 +30,7 @@ import {
   type PrintModeRun,
   runPrintMode,
 } from "./helpers/print-mode-runner.js";
+import { removeTempDir } from "./helpers/temp-dir.js";
 
 vi.setConfig({ testTimeout: 30_000 });
 
@@ -88,7 +89,7 @@ describe("nested delegation e2e (real pi-mono, faux model)", () => {
   afterEach(async () => {
     await run?.dispose();
     run = undefined;
-    for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+    for (const d of tmpDirs.splice(0)) await removeTempDir(d);
   });
 
   it("a child with allowed_subagents spawns its own child, and the output travels back up", async () => {

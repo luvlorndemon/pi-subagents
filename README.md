@@ -1,3 +1,43 @@
+# @luvlorndemon/pi-subagents — native Pi sessions
+
+This fork starts independent Pi sessions with Pi's native system prompt. It does not select Explore, Plan, general-purpose, or custom personas. The parent supplies the task as a user message. Existing orchestration, queues, foreground/background runs, steering, resume, scheduling and workflows remain available.
+
+**Fork reference:** [Native sessions, pi-purge integration and upstream updates](docs/native-sessions.md). Tested SDK: **Pi 1.5.2**; declared range `>=1.5.2 <1.6.0`. Node.js **>=22.19.0**. This fork is not published to npm.
+
+## Install this fork
+
+Use a local checkout for development:
+
+```powershell
+pi -e "D:\Coding\pi-p\pi-subagents" -e "D:\Coding\pi-p\pi-purge"
+```
+
+Install the committed version from this fork:
+
+```sh
+pi install git:github.com/luvlorndemon/pi-subagents
+```
+
+Load only one copy of pi-subagents. The package entry is `src/native.ts`; directly loading `src/index.ts` selects the preserved upstream implementation.
+
+## Native usage
+
+```js
+Agent({ prompt: "Read the failing test and explain the cause. Do not edit files.", description: "Find failure cause", run_in_background: false })
+```
+
+Default context is task-only. `inherit_context: true` explicitly adds a text snapshot of the parent conversation, excluding tool results and images. It never copies the parent's system prompt. Model/thinking inherit unless overridden; tools remain within the parent's selected scope.
+
+No agent definition files are loaded. `subagent_type` is absent from the tool schema; old supplied values are ignored. RPC `type` and workflow `agentType` are also ignored. Names are task handles, not personas. Native Pi project instructions, skills and extensions still apply.
+
+Nested delegation defaults off. Enable `nativeDelegation: true` in `.pi/subagents.json` or `/agents → Settings → Nested delegation`; existing depth and concurrency limits still apply.
+
+With the companion pi-purge bridge, children capture independent copies of the parent's effective, possibly unsaved configuration before queueing. Profiles/rules resolve from the parent configuration root, tools and `{{cwd}}` use the child's directory, and completion waits for native continuation rounds. See the fork reference for exclusions and resume semantics.
+
+## Preserved upstream reference
+
+The reference below describes the original entry. Persona presets, agent files, persona memory/preloading, append/twin prompts, custom Agent descriptions and original npm install commands below **do not apply to this fork's native entry**. Other orchestration contracts remain applicable; the fork reference above takes precedence.
+
 # @tintinweb/pi-subagents
 
 <p align="center">

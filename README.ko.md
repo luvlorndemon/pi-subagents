@@ -1,3 +1,9 @@
+# @luvlorndemon/pi-subagents — native Pi sessions
+
+이 fork는 Pi 1.5.2의 기본 세션을 실행하며 프리셋 및 사용자 정의 페르소나를 사용하지 않습니다. 부모 대화는 기본적으로 전달하지 않으며 `inherit_context`로 지정합니다. 중첩 위임은 `nativeDelegation`으로 활성화합니다. pi-purge 설정은 각 자식에게 독립적으로 복사됩니다. Node.js >=22.19.0이 필요합니다.
+
+[설치 및 사용 방법 (EN)](README.md#install-this-fork) · [fork 상세 안내 (EN)](docs/native-sessions.md). 아래는 상위 프로젝트의 참고 문서입니다. 페르소나, 에이전트 정의, twin 프롬프트 및 기존 npm 설치 방법은 이 fork에 적용되지 않습니다. 패키지 진입점은 `src/native.ts`입니다.
+
 # @tintinweb/pi-subagents
 
 <!-- full-readme: README.md · https://github.com/tintinweb/pi-subagents/blob/master/README.md -->

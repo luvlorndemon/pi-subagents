@@ -249,7 +249,7 @@ describe("toolDescriptionMode", () => {
   it("the shipped example template renders byte-identical to the full description", async () => {
     // Guards examples/agent-tool-description.md against going stale: it must
     // reproduce the full description exactly. If you edit one, edit the other.
-    const example = readFileSync(EXAMPLE_TEMPLATE, "utf-8");
+    const example = readFileSync(EXAMPLE_TEMPLATE, "utf-8").replace(/\r\n/g, "\n");
     const tools = setup({ toolDescriptionMode: "custom" }, () => {
       writeFileSync(join(tmpDir, ".pi", "agent-tool-description.md"), example);
     });

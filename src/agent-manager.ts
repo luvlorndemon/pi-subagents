@@ -27,6 +27,8 @@ import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
 import { getAgentConfig } from "./agent-types.js";
 import { assignHandle, handleBase } from "./mention.js";
 import { describeModel } from "./model-resolver.js";
+import { captureNativeContext, type NativeSpawnContext } from "./native-context.js";
+import { isNativeSessionMode, NATIVE_SESSION_TYPE } from "./native-mode.js";
 import type { AgentInvocation, AgentRecord, AgentTombstone, IsolationMode, MentionResolution, Pool, SubagentType, ThinkingLevel } from "./types.js";
 import { addUsage, type LifetimeUsage } from "./usage.js";
 import type { CompiledSchema } from "./workflow/json-schema.js";
@@ -180,6 +182,7 @@ interface SpawnArgs {
 }
 
 interface SpawnOptions {
+  nativeContext?: NativeSpawnContext;
   description: string;
   /**
    * Optional memorable name for this instance, becoming a second handle
@@ -546,6 +549,10 @@ export class AgentManager {
     prompt: string,
     options: SpawnOptions,
   ): string {
+    if (isNativeSessionMode()) {
+      type = NATIVE_SESSION_TYPE;
+      options = { ...options, nativeContext: captureNativeContext(pi, ctx) };
+    }
     // Validate before the queue branch — a queued spawn should fail at the
     // call, not minutes later at drain. Throw (not warn): programmatic callers
     // can fix and retry; the RPC layer converts throws into error envelopes.
@@ -875,6 +882,7 @@ export class AgentManager {
 
     const promise = runAgent(ctx, type, prompt, {
       pi,
+      nativeContext: options.nativeContext,
       agentId: id,
       model: options.model,
       maxTurns: options.maxTurns,

@@ -1,16 +1,18 @@
 {
-  "name": "@tintinweb/pi-subagents",
+  "name": "@luvlorndemon/pi-subagents",
   "version": "0.23.2",
-  "description": "A pi extension that brings Claude Code-like sub-agents and workflow orchestration to pi — parallel execution, live widget, fleet view, custom agent types, mid-run steering, dynamic workflows, Claude Code compatibility, look and feel.",
+  "type": "module",
+  "description": "Native pi subagent sessions without persona presets, with parallel orchestration and pi-purge configuration snapshots.",
   "author": "tintinweb",
   "license": "MIT",
+  "engines": { "node": ">=22.19.0" },
   "repository": {
     "type": "git",
-    "url": "https://github.com/tintinweb/pi-subagents.git"
+    "url": "https://github.com/luvlorndemon/pi-subagents.git"
   },
-  "homepage": "https://github.com/tintinweb/pi-subagents#readme",
+  "homepage": "https://github.com/luvlorndemon/pi-subagents#readme",
   "bugs": {
-    "url": "https://github.com/tintinweb/pi-subagents/issues"
+    "url": "https://github.com/luvlorndemon/pi-subagents/issues"
   },
   "publishConfig": {
     "access": "public"
@@ -24,9 +26,9 @@
     "autonomous"
   ],
   "peerDependencies": {
-    "@earendil-works/pi-ai": ">=1.1.0",
-    "@earendil-works/pi-coding-agent": ">=1.1.0",
-    "@earendil-works/pi-tui": ">=1.1.0",
+    "@earendil-works/pi-ai": ">=1.5.2 <1.6.0",
+    "@earendil-works/pi-coding-agent": ">=1.5.2 <1.6.0",
+    "@earendil-works/pi-tui": ">=1.5.2 <1.6.0",
     "typebox": "*"
   },
   "dependencies": {
@@ -49,9 +51,9 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.14",
-    "@earendil-works/pi-ai": "1.1.0",
-    "@earendil-works/pi-coding-agent": "1.1.0",
-    "@earendil-works/pi-tui": "1.1.0",
+    "@earendil-works/pi-ai": "1.5.2",
+    "@earendil-works/pi-coding-agent": "1.5.2",
+    "@earendil-works/pi-tui": "1.5.2",
     "@sinclair/typebox": "^0.34.49",
     "@types/node": "^25.5.0",
     "@vitest/coverage-istanbul": "^4.1.11",
@@ -61,7 +63,7 @@
   },
   "pi": {
     "extensions": [
-      "./src/index.ts"
+      "./src/native.ts"
     ],
     "video": "https://github.com/tintinweb/pi-subagents/raw/master/media/demo.mp4",
     "image": "https://github.com/tintinweb/pi-subagents/raw/master/media/screenshot.png"

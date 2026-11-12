@@ -41,7 +41,7 @@
  * what you register in `beforeRun` and which `subagent_type` the `Agent` call
  * names. See `test/subagents-print-mode-e2e.test.ts` for usage.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,6 +68,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { fauxModelBackend } from "./faux-model-backend.js";
 import { getModel, registerFauxProvider } from "./pi-ai.js";
+import { removeTempDir } from "./temp-dir.js";
 
 /** Path to the pi-subagents extension entrypoint (repo `src/index.ts`). */
 const EXTENSION_PATH = fileURLToPath(new URL("../../src/index.ts", import.meta.url));
@@ -452,9 +453,9 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
       else process.env.PI_CODING_AGENT_DIR = prevAgentDir;
       if (prevHome == null) delete process.env.HOME;
       else process.env.HOME = prevHome;
-      if (hermeticDir) rmSync(hermeticDir, { recursive: true, force: true });
+      if (hermeticDir) await removeTempDir(hermeticDir);
     }
-    if (ownsCwd) rmSync(cwd, { recursive: true, force: true });
+    if (ownsCwd) await removeTempDir(cwd);
   };
 
   // --- drive the turn under a wall-clock guard ---

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **⚠️ Behavior change — nested spawns are refused once 10 nested subagents are running** ([#427](https://github.com/tintinweb/pi-subagents/pull/427)). Only agents with `allowed_subagents` are affected; the parent gets a tool error and does the work itself. To restore the unbounded behavior, set `/agents → Settings → Max nested concurrency` (`maxConcurrentNested`) to `0`.
 
 ### Added
+- **Native-session fork entry.** The package uses Pi's native system prompt without persona definitions, preserves orchestration, and snapshots the parent's live pi-purge configuration for each child. Nested delegation defaults off (`nativeDelegation`); see `docs/native-sessions.md` for migration and upstream maintenance.
 - **`maxConcurrentNested` caps how many nested subagents run at once** ([#427](https://github.com/tintinweb/pi-subagents/pull/427), part of [#352](https://github.com/tintinweb/pi-subagents/issues/352)). Nested children skip both queueing pools, so nothing bounded a parent's fan-out. A nested spawn over the limit (default `10`, `0` = unlimited) is refused rather than queued, since queueing a child behind its waiting parent would deadlock. Top-level and workflow agents neither count nor are refused. In `/agents → Settings`, "Max concurrency" is now "Max background concurrency", next to the new "Max nested concurrency" and "Nested depth".
 
 ## [0.23.2] - 2026-11-10

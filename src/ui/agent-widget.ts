@@ -9,6 +9,7 @@ import { truncateToWidth } from "@earendil-works/pi-tui";
 import { renderAgentName } from "../agent-color.js";
 import { type AgentManager, isTopLevelAgent } from "../agent-manager.js";
 import { getConfig } from "../agent-types.js";
+import { isNativeSessionMode } from "../native-mode.js";
 import type { AgentInvocation, SubagentType, WidgetMode } from "../types.js";
 import { getLifetimeCost, getLifetimeTotal, getSessionContextPercent, type LifetimeUsage, type SessionLike } from "../usage.js";
 
@@ -179,11 +180,13 @@ export function formatDuration(startedAt: number, completedAt?: number): string 
 
 /** Get display name for any agent type (built-in or custom). */
 export function getDisplayName(type: SubagentType): string {
+  if (isNativeSessionMode()) return "pi";
   return getConfig(type).displayName;
 }
 
 /** Short label for prompt mode: "twin" for append, nothing for replace (the default). */
 export function getPromptModeLabel(type: SubagentType): string | undefined {
+  if (isNativeSessionMode()) return "native";
   const config = getConfig(type);
   return config.promptMode === "append" ? "twin" : undefined;
 }

@@ -10,7 +10,7 @@
  * server's answer in the report proves a real tool call; `secret` must be refused,
  * because the agent named only `echo`.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +18,7 @@ import type { Context } from "@earendil-works/pi-ai";
 import { fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { agentCall, agentToolResults, type PrintModeRun, routeBySession, runPrintMode } from "../helpers/print-mode-runner.js";
+import { removeTempDir } from "../helpers/temp-dir.js";
 
 vi.setConfig({ testTimeout: 30_000 });
 
@@ -38,7 +39,7 @@ describe("bare mcp__ entries in tools: (real pi MCP, stdio server, faux model)",
   afterEach(async () => {
     await run?.dispose();
     run = undefined;
-    if (cwd) rmSync(cwd, { recursive: true, force: true });
+    if (cwd) await removeTempDir(cwd);
   });
 
   /** Spawn an agent with `tools`; it calls `secret`, then `echo`, and reports both results. */

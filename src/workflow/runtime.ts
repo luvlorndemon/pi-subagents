@@ -15,6 +15,7 @@
 
 import { cpus } from "node:os";
 import { Worker } from "node:worker_threads";
+import { isNativeSessionMode, NATIVE_SESSION_TYPE } from "../native-mode.js";
 import { type JournalKeyInput, journalKey, type WorkflowJournalEntry } from "./journal.js";
 import { type CompiledSchema, compileJsonSchema } from "./json-schema.js";
 import { extractMeta, type WorkflowMeta } from "./meta.js";
@@ -849,7 +850,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<Workflow
       // reads the same as the row it continues.
       const agentId = resumed?.agentId ?? `wf-agent-${index}`;
       const label = payload.label ?? resumed?.label ?? derivedLabel(payload.prompt);
-      const agentType = resumed?.agentType ?? payload.agentType ?? "general-purpose";
+      const agentType = isNativeSessionMode() ? NATIVE_SESSION_TYPE : resumed?.agentType ?? payload.agentType ?? "general-purpose";
       const model = resumed !== undefined ? resumed.model : payload.model;
       const isolation = resumed !== undefined ? resumed.isolation : payload.isolation;
       openLaunches.set(callId, label);

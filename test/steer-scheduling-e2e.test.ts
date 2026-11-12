@@ -1,10 +1,11 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Context, getCurrentTools } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { agentCall, type PrintModeRun, runPrintMode } from "./helpers/print-mode-runner.js";
+import { removeTempDir } from "./helpers/temp-dir.js";
 
 vi.setConfig({ testTimeout: 30_000 });
 
@@ -35,7 +36,7 @@ describe("background completion steering scheduling", () => {
     await run?.dispose();
     run = undefined;
     delete (globalThis as Record<symbol, unknown>)[BLOCKING_TOOL_CONTROL];
-    if (cwd) rmSync(cwd, { recursive: true, force: true });
+    if (cwd) await removeTempDir(cwd);
     cwd = undefined;
   });
 

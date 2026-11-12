@@ -7,6 +7,7 @@
 
 import { createCodingTools, createReadOnlyTools } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_AGENTS } from "./default-agents.js";
+import { isNativeSessionMode, NATIVE_SESSION_TYPE } from "./native-mode.js";
 import type { AgentConfig } from "./types.js";
 
 /**
@@ -61,6 +62,7 @@ export function setFallbackSubagent(v: string | undefined): void { fallbackSubag
  */
 export function buildAgentRegistry(userAgents: Map<string, AgentConfig>): Map<string, AgentConfig> {
   const registry = new Map<string, AgentConfig>();
+  if (isNativeSessionMode()) return registry;
   if (!disableDefaults) {
     for (const [name, config] of DEFAULT_AGENTS) registry.set(name, config);
   }
@@ -102,6 +104,7 @@ export function resolveTypeIn(registry: Map<string, AgentConfig>, name: string):
 
 /** Get the agent config for a type (case-insensitive) from a registry. */
 export function getAgentConfigIn(registry: Map<string, AgentConfig>, name: string): AgentConfig | undefined {
+  if (isNativeSessionMode()) return undefined;
   const key = resolveKeyIn(registry, name);
   return key ? registry.get(key) : undefined;
 }
@@ -144,6 +147,7 @@ export function resolveEnabledTypeIn(
   registry: Map<string, AgentConfig>,
   requested: unknown,
 ): string | undefined {
+  if (isNativeSessionMode()) return NATIVE_SESSION_TYPE;
   const raw = typeof requested === "string" ? requested.trim() : "";
   if (!raw) return undefined;
   const key = resolveUnambiguousKeyIn(registry, raw);
@@ -175,6 +179,7 @@ export function resolveSpawnTypeIn(
   registry: Map<string, AgentConfig>,
   requested: unknown,
 ): SpawnTypeResolution {
+  if (isNativeSessionMode()) return { ok: true, type: NATIVE_SESSION_TYPE };
   const raw = typeof requested === "string" ? requested.trim() : "";
   const available = () => getAvailableTypesIn(registry).join(", ") || "(none)";
 
@@ -225,6 +230,7 @@ export function resolveSpawnType(requested: unknown): SpawnTypeResolution {
 
 /** Resolve a type name case-insensitively. Returns the canonical key or undefined. */
 export function resolveType(name: string): string | undefined {
+  if (isNativeSessionMode()) return name === NATIVE_SESSION_TYPE ? NATIVE_SESSION_TYPE : undefined;
   return resolveKey(name);
 }
 
@@ -235,11 +241,13 @@ export function getAgentConfig(name: string): AgentConfig | undefined {
 
 /** Get all enabled type names (for spawning and tool descriptions). */
 export function getAvailableTypes(): string[] {
+  if (isNativeSessionMode()) return [];
   return getAvailableTypesIn(agents);
 }
 
 /** Get all type names including disabled (for UI listing). */
 export function getAllTypes(): string[] {
+  if (isNativeSessionMode()) return [];
   return [...agents.keys()];
 }
 
@@ -259,6 +267,7 @@ export function getUserAgentNames(): string[] {
 
 /** Check if a type is valid and enabled (case-insensitive). */
 export function isValidType(type: string): boolean {
+  if (isNativeSessionMode()) return type === NATIVE_SESSION_TYPE;
   return isValidTypeIn(agents, type);
 }
 

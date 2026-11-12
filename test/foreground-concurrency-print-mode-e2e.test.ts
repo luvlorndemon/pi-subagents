@@ -16,7 +16,7 @@
  * proves the detector can see parallelism at all, so `maxInFlight === 1` is a
  * result rather than a broken probe.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Context, getCurrentTools } from "@earendil-works/pi-ai";
@@ -27,6 +27,7 @@ import {
   type PrintModeRun,
   runPrintMode,
 } from "./helpers/print-mode-runner.js";
+import { removeTempDir } from "./helpers/temp-dir.js";
 
 // Real pi-mono: loader, dynamic extension import, three live sessions.
 vi.setConfig({ testTimeout: 60_000 });
@@ -43,7 +44,7 @@ describe.skipIf(LIVE)("maxConcurrentForeground e2e (real pi agent loop)", () => 
   afterEach(async () => {
     await run?.dispose();
     run = undefined;
-    for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+    for (const d of tmpDirs.splice(0)) await removeTempDir(d);
   });
 
   function projectDir(settings: Record<string, unknown>): string {

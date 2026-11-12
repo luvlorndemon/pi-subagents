@@ -6,6 +6,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { BUILTIN_TOOL_NAMES } from "./agent-types.js";
+import { isNativeSessionMode } from "./native-mode.js";
 import {
   isPackageResourceExcluded,
   MAX_PACKAGE_RESOURCE_BYTES,
@@ -79,6 +80,7 @@ export function loadCustomAgents(
   strict = false,
   opts: LoadCustomAgentsOptions = {},
 ): Map<string, AgentConfig> {
+  if (isNativeSessionMode()) return new Map();
   const globalDir = join(getAgentDir(), "agents");
   const workspaceProjectDir = join(cwd, ".agents", "agents");
   const projectDir = join(cwd, ".pi", "agents");

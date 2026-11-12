@@ -33,6 +33,7 @@ import { describeMention, handleBase, isReservedHandle, parseMention, resolveHan
 import { runMentionClone } from "./mention-clone.js";
 import { describeModel, type ModelRegistry, resolveModel } from "./model-resolver.js";
 import { checkModelScope, isScopeModelsEnabled, setScopeModelsEnabled } from "./model-scope.js";
+import { isNativeSessionMode, nativeDelegationEnabled, nativeWorkflowDescription, omitPersonaParameter, setNativeDelegation } from "./native-mode.js";
 import { getMaxSubagentDepth, setMaxSubagentDepth } from "./nested-tools.js";
 import { createOutputFilePath, ensureOutputFile, getOutputTranscriptDefault, sessionTaskDir, setOutputTranscriptDefault, streamToOutputFile, writeInitialEntry } from "./output-file.js";
 import { getPackageAgentsGate, getPackageWorkflowsGate, invalidatePackageCache, packageNameForPath, seedProjectTrust, setPackageAgentsGate, setPackageWorkflowsGate, setProjectTrusted } from "./package-resources.js";
@@ -1565,6 +1566,7 @@ export default function (pi: ExtensionAPI) {
   // to stderr and falls back to defaults.
   applyAndEmitLoaded(
     {
+      setNativeDelegation,
       setMaxConcurrent: (n) => manager.setMaxConcurrent(n),
       setMaxConcurrentForeground: (n) => manager.setMaxConcurrentForeground(n),
       setMaxConcurrentNested: (n) => manager.setMaxConcurrentNested(n),
@@ -1731,6 +1733,7 @@ Terse command-style prompts produce shallow, generic work.
   };
 
   const agentToolDescription = (() => {
+    if (isNativeSessionMode()) return "Start an independent pi session to execute a self-contained task using pi's native system prompt. No persona or agent type is selected. Only the task is sent by default; inherit_context explicitly adds a text snapshot of the parent conversation (without tool results or images). The child inherits the current model and the parent's tool scope, and loads pi-purge with a snapshot of the parent's effective configuration when available. Background runs return an id and notify on completion; pass run_in_background: false to wait inline. Use resume for a finished session and steer_subagent for a running one. Launch independent tasks together and verify their actual results. Legacy subagent_type values are ignored.";
     const mode = getToolDescriptionMode();
     if (mode === "compact") return compactAgentToolDescription;
     if (mode === "custom") {
@@ -1749,7 +1752,10 @@ Terse command-style prompts produce shallow, generic work.
     label: "Agent",
     description: agentToolDescription,
     promptSnippet: "Launch autonomous sub-agents for complex multi-step tasks",
-    promptGuidelines: [
+    promptGuidelines: isNativeSessionMode() ? [
+      "Delegate self-contained tasks through Agent without selecting a persona. Avoid duplicating delegated work.",
+      "Background tasks notify on completion. Verify results before reporting success.",
+    ] : [
       "Use Agent with specialized agents when the task matches an agent type's description. Subagents are valuable for parallelizing independent queries or for protecting the main context window from excessive results, but should not be used excessively when not needed. Importantly, avoid duplicating work that subagents are already doing — if you delegate research to a subagent, do not also perform the same searches yourself.",
       // Names Explore only when it can be spawned, as Claude Code does (#330).
       // Read at registration, like the type list in the description.
@@ -2001,7 +2007,9 @@ Terse command-style prompts produce shallow, generic work.
       // foreground path. Resume deliberately doesn't: it replays the stored
       // session and ignores `subagent_type` entirely, so a note about type
       // substitution would be describing something that didn't happen.
-      const fallbackNote = dispatch.ok && dispatch.fellBackFrom !== undefined
+      const fallbackNote = isNativeSessionMode() && rawType !== undefined
+        ? "Note: legacy subagent_type was ignored; this task uses a native pi session without a persona.\n\n"
+        : dispatch.ok && dispatch.fellBackFrom !== undefined
         ? `Note: Unknown agent type "${dispatch.fellBackFrom}" — using ${resolveType(subagentType) ? subagentType : "the fallback agent config"}.\n\n`
         : "";
 
@@ -2582,6 +2590,7 @@ Terse command-style prompts produce shallow, generic work.
 
   // The mention path is handed THIS object, not the bare `agentTool` — see the
   // mention-clone header on why the clone must call the registered tool.
+  omitPersonaParameter(agentTool.parameters);
   const registeredAgentTool = withUsageReporting(agentTool);
   pi.registerTool(registeredAgentTool);
 
@@ -2689,7 +2698,7 @@ Terse command-style prompts produce shallow, generic work.
   const workflowTool = defineTool({
     name: SUBAGENT_TOOL_NAMES.WORKFLOW,
     label: "SubagentWorkflow",
-    description: renderToolDescriptionTemplate(fullWorkflowToolDescription),
+    description: renderToolDescriptionTemplate(nativeWorkflowDescription(fullWorkflowToolDescription)),
     promptSnippet: "Run a deterministic script that orchestrates many subagents",
     promptGuidelines: [
       "Use SubagentWorkflow when the number of agents depends on something discovered at runtime, when work flows through stages, or when findings should be independently verified. Use Agent for one delegated task or a handful you can name up front.",
@@ -3224,10 +3233,10 @@ Terse command-style prompts produce shallow, generic work.
     }
 
     // Actions
-    options.push("Create new agent");
+    if (!isNativeSessionMode()) options.push("Create new agent");
     options.push("Settings");
 
-    const noAgentsMsg = allNames.length === 0 && agents.length === 0
+    const noAgentsMsg = !isNativeSessionMode() && allNames.length === 0 && agents.length === 0
       ? "No agents found. Create specialized subagents that can be delegated to.\n\n" +
         "Each subagent has its own context window, custom system prompt, and specific tools.\n\n" +
         "Try creating: Code Reviewer, Security Auditor, Test Writer, or Documentation Writer.\n\n"
@@ -3755,6 +3764,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
   function snapshotSettings() {
     return {
       maxConcurrent: manager.getMaxConcurrent(),
+      nativeDelegation: nativeDelegationEnabled(),
       // 0 = unlimited, and the default — see SubagentsSettings.
       maxConcurrentForeground: manager.getMaxConcurrentForeground(),
       maxConcurrentNested: manager.getMaxConcurrentNested(),
@@ -3854,6 +3864,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
       const fallbackValues = [...new Set([...getAvailableTypes(), NO_FALLBACK])];
 
       return [
+        ...(isNativeSessionMode() ? [{ id: "nativeDelegation", label: "Nested delegation", description: "Allow native child sessions to delegate within the existing depth and concurrency limits (default off).", currentValue: nativeDelegationEnabled() ? "on" : "off", values: ["on", "off"] }] : []),
         {
           id: "maxConcurrent",
           label: "Max background concurrency",
@@ -4059,11 +4070,14 @@ Write the file using the write tool. Only write the file, nothing else.`;
           currentValue: getToolDescriptionMode(),
           values: ["full", "compact", "custom"],
         },
-      ];
+      ].filter(item => !isNativeSessionMode() || !["strictAgentFiles", "disableDefaultAgents", "fallbackSubagent", "packageAgents", "toolDescriptionMode"].includes(item.id));
     }
 
     function applyValue(id: string, value: string) {
-      if (id === "maxConcurrent") {
+      if (id === "nativeDelegation") {
+        setNativeDelegation(value === "on");
+        notifyApplied(ctx, `Native nested delegation ${value}`);
+      } else if (id === "maxConcurrent") {
         const n = parseInt(value, 10);
         if (n >= 1) {
           manager.setMaxConcurrent(n);

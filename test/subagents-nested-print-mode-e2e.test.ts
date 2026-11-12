@@ -13,7 +13,7 @@
  * reconciled with the merged #164 frontmatter contract (`allowed_subagents`
  * opt-in; no nested tools injected at the depth cap).
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Context, getCurrentTools, type ToolCall } from "@earendil-works/pi-ai";
@@ -26,6 +26,7 @@ import {
   type PrintModeRun,
   runPrintMode,
 } from "./helpers/print-mode-runner.js";
+import { removeTempDir } from "./helpers/temp-dir.js";
 
 vi.setConfig({ testTimeout: 30_000 });
 
@@ -151,7 +152,7 @@ describe("PR #164 nested agents through the real print-mode boundary", () => {
   afterEach(async () => {
     await run?.dispose();
     run = undefined;
-    if (cwd) rmSync(cwd, { recursive: true, force: true });
+    if (cwd) await removeTempDir(cwd);
     cwd = undefined;
   });
 
